@@ -76,6 +76,12 @@ void Error_Handler(void);
 #define RMII_RXD1_GPIO_Port GPIOC
 #define LD1_Pin GPIO_PIN_0
 #define LD1_GPIO_Port GPIOB
+#define TOUCH_IRQ_Pin GPIO_PIN_0
+#define TOUCH_IRQ_GPIO_Port GPIOG
+#define TFT_DC_Pin GPIO_PIN_11
+#define TFT_DC_GPIO_Port GPIOE
+#define TFT_RESET_Pin GPIO_PIN_12
+#define TFT_RESET_GPIO_Port GPIOE
 #define RMII_TXD1_Pin GPIO_PIN_13
 #define RMII_TXD1_GPIO_Port GPIOB
 #define LD3_Pin GPIO_PIN_14

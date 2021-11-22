@@ -113,7 +113,6 @@ void MX_LWIP_Init(void)
  */
 void MX_LWIP_Process(void)
 {
-	// Check Link connections
 /* USER CODE BEGIN 4_1 */
 /* USER CODE END 4_1 */
   ethernetif_input(&gnetif);
