@@ -49,7 +49,10 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
+
 SemaphoreHandle_t xMutexPrintf;
+QueueHandle_t xAnalogQueue, xI2CQueue;
+
 /* USER CODE END Variables */
 /* Definitions for DefaultTask */
 osThreadId_t DefaultTaskHandle;
@@ -131,6 +134,8 @@ void MX_FREERTOS_Init(void) {
 
 	/* USER CODE BEGIN RTOS_QUEUES */
 	/* add queues, ... */
+	xAnalogQueue = xQueueCreate( 10, sizeof( uint16_t ) );
+	xI2CQueue = xQueueCreate( 10, sizeof( uint16_t ) );
 	/* USER CODE END RTOS_QUEUES */
 
 	/* Create the thread(s) */
@@ -187,8 +192,11 @@ void vAnalogTask(void *pvParameters) {
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
 
 	for (;;) {
-		for (uint8_t i = 0; i <= 2; i++) {
-			printf("ADC_Value%d: %d\n\r", i, AdcValue[i]);
+
+		if (pdTRUE == xQueueSend(xAnalogQueue, (void*)&AdcValue, portMAX_DELAY)) {
+			for (uint8_t i = 0; i <= 2; i++) {
+				printf("ADC_Value%d: %d\n\r", i, AdcValue[i]);
+			}
 		}
 		vTaskDelay(xDelay);
 	}
@@ -200,7 +208,11 @@ void vSen0335Task(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
+
+	volatile uint16_t SEN0335Value[3] = {0};
+
 	for (;;) {
+
 		vTaskDelay(xDelay);
 	}
 }
@@ -221,8 +233,17 @@ void vLCDTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
+
+	uint16_t AdcValue[3];
+
 	for (;;) {
-		vTaskDelay(xDelay);
+
+		if (pdTRUE == xQueueReceive(xAnalogQueue, &(AdcValue), (TickType_t) 10)) {
+			for (uint8_t i = 0; i <= 2; i++) {
+				printf("ADC_Value%d: %d\n\r", i, AdcValue[i]);
+			}
+			vTaskDelay(xDelay);
+		}
 	}
 }
 
@@ -231,6 +252,7 @@ void vVeml7700Task(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
+
 	for (;;) {
 		vTaskDelay(xDelay);
 	}
