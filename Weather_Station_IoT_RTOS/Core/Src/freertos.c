@@ -61,6 +61,19 @@ const osThreadAttr_t DefaultTask_attributes = { .name = "DefaultTask",
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
+
+static void vQueueAnalogReceive(uint16_t *val, uint8_t pvItemToQueue) {
+	for (uint8_t i = 0; i <= pvItemToQueue; i++) {
+		xQueueReceive(xAnalogQueue, &(val[i]), portMAX_DELAY);
+	}
+}
+
+static void vQueueAnalogSend(uint16_t * val, uint8_t pvItemToQueue)
+{
+	for (uint8_t i = 0; i <= pvItemToQueue; i++) {
+		xQueueSend(xAnalogQueue, &val[i], portMAX_DELAY);
+	}
+}
 void vAnalogTask(void *pvParameters);
 void vEthernetTask(void *pvParameters);
 void vSen0335Task(void *pvParameters);
@@ -75,6 +88,7 @@ void StartDefaultTask(void *argument);
 
 extern void MX_LWIP_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
+
 
 /* Hook prototypes */
 void vApplicationIdleHook(void);
@@ -134,8 +148,8 @@ void MX_FREERTOS_Init(void) {
 
 	/* USER CODE BEGIN RTOS_QUEUES */
 	/* add queues, ... */
-	xAnalogQueue = xQueueCreate( 10, sizeof( uint16_t ) );
-	xI2CQueue = xQueueCreate( 10, sizeof( uint16_t ) );
+	xAnalogQueue = xQueueCreate(10, sizeof(uint16_t));
+	xI2CQueue = xQueueCreate(10, sizeof(uint16_t));
 	/* USER CODE END RTOS_QUEUES */
 
 	/* Create the thread(s) */
@@ -145,12 +159,17 @@ void MX_FREERTOS_Init(void) {
 
 	/* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
-	xTaskCreate(vAnalogTask, "AnalogTask", 256, (void*) 1, NORMAL_PRIORITY,NULL);
-	xTaskCreate(vHeartBeatTask, "HeartBeatTask", 128, (void*) 1,NORMAL_PRIORITY, NULL);
-	xTaskCreate(vSen0335Task, "Sen0335Task", 128, (void*) 1, NORMAL_PRIORITY,NULL);
+	xTaskCreate(vAnalogTask, "AnalogTask", 256, (void*) 1, NORMAL_PRIORITY,
+	NULL);
+	xTaskCreate(vHeartBeatTask, "HeartBeatTask", 128, (void*) 1,
+	NORMAL_PRIORITY, NULL);
+	xTaskCreate(vSen0335Task, "Sen0335Task", 128, (void*) 1, NORMAL_PRIORITY,
+	NULL);
 	xTaskCreate(vLCDTask, "LCDTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vVeml7700Task, "Veml7700Task", 128, (void*) 1, NORMAL_PRIORITY,NULL);
-	xTaskCreate(vEthernetTask, "EthernetTask", 256, (void*) 1, NORMAL_PRIORITY,NULL);
+	xTaskCreate(vVeml7700Task, "Veml7700Task", 128, (void*) 1, NORMAL_PRIORITY,
+	NULL);
+	xTaskCreate(vEthernetTask, "EthernetTask", 256, (void*) 1, NORMAL_PRIORITY,
+	NULL);
 	/* USER CODE END RTOS_THREADS */
 
 	/* USER CODE BEGIN RTOS_EVENTS */
@@ -185,21 +204,16 @@ void vAnalogTask(void *pvParameters) {
 
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
-	volatile uint16_t AdcValue[3];
+	uint16_t AdcValue[3];
 	//	AdcValue = pvPortMalloc(32 * sizeof(uint16_t));
 	HAL_ADC_Start_DMA(&hadc1, (uint32_t*) AdcValue, 3);
 
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
 
 	for (;;) {
-
-		if (pdTRUE == xQueueSend(xAnalogQueue, (void*)&AdcValue, portMAX_DELAY)) {
-			for (uint8_t i = 0; i <= 2; i++) {
-				printf("ADC_Value%d: %d\n\r", i, AdcValue[i]);
-			}
-		}
-		vTaskDelay(xDelay);
+		vQueueAnalogSend(AdcValue, 3);
 	}
+	vTaskDelay(xDelay);
 }
 
 /* Weather sensor (temperature, humidity, atmospheric pressure */
@@ -209,7 +223,7 @@ void vSen0335Task(void *pvParameters) {
 
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
 
-	volatile uint16_t SEN0335Value[3] = {0};
+	uint16_t SEN0335Value[3] = { 0 };
 
 	for (;;) {
 
@@ -237,13 +251,12 @@ void vLCDTask(void *pvParameters) {
 	uint16_t AdcValue[3];
 
 	for (;;) {
+		vQueueAnalogReceive(AdcValue, 3);
+		printf("ADC_Value%d: %d\n\r", 1, AdcValue[0]);
+		printf("ADC_Value%d: %d\n\r", 2, AdcValue[1]);
+		printf("ADC_Value%d: %d\n\r", 3, AdcValue[2]);
 
-		if (pdTRUE == xQueueReceive(xAnalogQueue, &(AdcValue), (TickType_t) 10)) {
-			for (uint8_t i = 0; i <= 2; i++) {
-				printf("ADC_Value%d: %d\n\r", i, AdcValue[i]);
-			}
-			vTaskDelay(xDelay);
-		}
+		vTaskDelay(xDelay);
 	}
 }
 
@@ -263,13 +276,18 @@ void vEthernetTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
+
+	uint16_t AdcValue[3];
+
 	for (;;) {
+
+		vQueueAnalogReceive(AdcValue, 3);
 		vTaskDelay(xDelay);
 	}
 }
 
 void _putchar(char character) {
-	// send char to console etc.
+// send char to console etc.
 	xSemaphoreTake(xMutexPrintf, portMAX_DELAY);
 	HAL_UART_Transmit(&huart3, (uint8_t*) &character, 1, 1000);
 	xSemaphoreGive(xMutexPrintf);
