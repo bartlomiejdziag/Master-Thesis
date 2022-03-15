@@ -25,6 +25,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "timers.h"
 #include "printf.h"
 #include "usart.h"
 #include "i2c.h"
@@ -50,8 +51,10 @@
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
 
-SemaphoreHandle_t xMutexPrintf;
+SemaphoreHandle_t xMutexPrintf, xMutexIdle;
 QueueHandle_t xAnalogQueue, xI2CQueue;
+TimerHandle_t xTimers;
+uint32_t IdleTicks;
 
 /* USER CODE END Variables */
 /* Definitions for DefaultTask */
@@ -68,8 +71,7 @@ static void vQueueAnalogReceive(uint16_t *val, uint8_t pvItemToQueue) {
 	}
 }
 
-static void vQueueAnalogSend(uint16_t * val, uint8_t pvItemToQueue)
-{
+static void vQueueAnalogSend(uint16_t *val, uint8_t pvItemToQueue) {
 	for (uint8_t i = 0; i <= pvItemToQueue; i++) {
 		xQueueSend(xAnalogQueue, &val[i], portMAX_DELAY);
 	}
@@ -81,7 +83,7 @@ void vLCDTask(void *pvParameters);
 void vVeml7700Task(void *pvParameters);
 void vEthernetTask(void *pvParameters);
 void vHeartBeatTask(void *pvParameters);
-
+void vTimerCallback(TimerHandle_t xTimer);
 /* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void *argument);
@@ -89,22 +91,22 @@ void StartDefaultTask(void *argument);
 extern void MX_LWIP_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
-
 /* Hook prototypes */
 void vApplicationIdleHook(void);
 void vApplicationMallocFailedHook(void);
 
 /* USER CODE BEGIN 2 */
 void vApplicationIdleHook(void) {
-	/* vApplicationIdleHook() will only be called if configUSE_IDLE_HOOK is set
-	 to 1 in FreeRTOSConfig.h. It will be called on each iteration of the idle
-	 task. It is essential that code added to this hook function never attempts
-	 to block in any way (for example, call xQueueReceive() with a block time
-	 specified, or call vTaskDelay()). If the application makes use of the
-	 vTaskDelete() API function (as this demo application does) then it is also
-	 important that vApplicationIdleHook() is permitted to return to its calling
-	 function, because it is the responsibility of the idle task to clean up
-	 memory allocated by the kernel to any task that has since been deleted. */
+
+	static uint32_t LastTick;
+
+	if (LastTick < osKernelGetTickCount()) {
+		xSemaphoreTake(xMutexPrintf, portMAX_DELAY);
+		IdleTicks++;
+		xSemaphoreGive(xMutexPrintf);
+		LastTick = osKernelGetTickCount();
+	}
+
 }
 /* USER CODE END 2 */
 
@@ -136,6 +138,7 @@ void MX_FREERTOS_Init(void) {
 	/* USER CODE BEGIN RTOS_MUTEX */
 	/* add mutexes, ... */
 	xMutexPrintf = xSemaphoreCreateMutex();
+	xMutexIdle = xSemaphoreCreateMutex();
 	/* USER CODE END RTOS_MUTEX */
 
 	/* USER CODE BEGIN RTOS_SEMAPHORES */
@@ -144,6 +147,7 @@ void MX_FREERTOS_Init(void) {
 
 	/* USER CODE BEGIN RTOS_TIMERS */
 	/* start timers, add new ones, ... */
+	xTimers = xTimerCreate("Timer", 1000, pdTRUE, (void*) 0, vTimerCallback);
 	/* USER CODE END RTOS_TIMERS */
 
 	/* USER CODE BEGIN RTOS_QUEUES */
@@ -189,6 +193,9 @@ void StartDefaultTask(void *argument) {
 	/* init code for LWIP */
 //  MX_LWIP_Init();
 	/* USER CODE BEGIN StartDefaultTask */
+	if ( xTimerStart( xTimers, 0 ) != pdPASS) {
+		printf("Timer not created\n\r");
+	}
 	/* Infinite loop */
 	for (;;) {
 		osDelay(1);
@@ -223,7 +230,7 @@ void vSen0335Task(void *pvParameters) {
 
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
 
-	uint16_t SEN0335Value[3] = { 0 };
+//	uint16_t SEN0335Value[3] = { 0 };
 
 	for (;;) {
 
@@ -252,9 +259,9 @@ void vLCDTask(void *pvParameters) {
 
 	for (;;) {
 		vQueueAnalogReceive(AdcValue, 3);
-		printf("ADC_Value%d: %d\n\r", 1, AdcValue[0]);
-		printf("ADC_Value%d: %d\n\r", 2, AdcValue[1]);
-		printf("ADC_Value%d: %d\n\r", 3, AdcValue[2]);
+		printf("RainSensor: %d\n\r", AdcValue[0]);
+		printf("MoistureSensor: %d\n\r", AdcValue[1]);
+		printf("Battery: %d\n\r", AdcValue[2]);
 
 		vTaskDelay(xDelay);
 	}
@@ -284,6 +291,19 @@ void vEthernetTask(void *pvParameters) {
 		vQueueAnalogReceive(AdcValue, 3);
 		vTaskDelay(xDelay);
 	}
+}
+
+void vTimerCallback(TimerHandle_t xTimer) {
+
+	uint32_t IdleTime;
+	xSemaphoreTake(xMutexPrintf, portMAX_DELAY);
+	IdleTime = (IdleTicks * 100) / 1000;
+	xSemaphoreGive(xMutexPrintf);
+
+	IdleTicks = 0;
+
+	printf("Idle Time: %d%%\n\r", IdleTime);
+
 }
 
 void _putchar(char character) {
