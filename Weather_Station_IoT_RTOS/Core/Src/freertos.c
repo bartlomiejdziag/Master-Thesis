@@ -40,7 +40,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define NORMAL_PRIORITY 1
+#define LOW_PRIORITY 1
+#define NORMAL_PRIORITY 2
+#define HIGH_PRIORITY 3
+#define ADC_SAMPLES 3
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -76,6 +79,14 @@ static void vQueueAnalogSend(uint16_t *val, uint8_t pvItemToQueue) {
 		xQueueSend(xAnalogQueue, &val[i], portMAX_DELAY);
 	}
 }
+
+static inline uint16_t* xCalcAdc(uint16_t *adc, uint16_t *resault) {
+	for (uint8_t i = 0; i < ADC_SAMPLES; i++) {
+		resault[i] = ((adc[i] * 100U) / 4096U);
+	}
+	return resault;
+}
+
 void vAnalogTask(void *pvParameters);
 void vEthernetTask(void *pvParameters);
 void vSen0335Task(void *pvParameters);
@@ -106,22 +117,12 @@ void vApplicationIdleHook(void) {
 		xSemaphoreGive(xMutexPrintf);
 		LastTick = osKernelGetTickCount();
 	}
-
 }
 /* USER CODE END 2 */
 
 /* USER CODE BEGIN 5 */
 void vApplicationMallocFailedHook(void) {
-	/* vApplicationMallocFailedHook() will only be called if
-	 configUSE_MALLOC_FAILED_HOOK is set to 1 in FreeRTOSConfig.h. It is a hook
-	 function that will get called if a call to pvPortMalloc() fails.
-	 pvPortMalloc() is called internally by the kernel whenever a task, queue,
-	 timer or semaphore is created. It is also called by various parts of the
-	 demo application. If heap_1.c or heap_2.c are used, then the size of the
-	 heap available to pvPortMalloc() is defined by configTOTAL_HEAP_SIZE in
-	 FreeRTOSConfig.h, and the xPortGetFreeHeapSize() API function can be used
-	 to query the size of free heap space that remains (although it does not
-	 provide information on how the remaining heap might be fragmented). */
+
 }
 /* USER CODE END 5 */
 
@@ -163,17 +164,12 @@ void MX_FREERTOS_Init(void) {
 
 	/* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
-	xTaskCreate(vAnalogTask, "AnalogTask", 256, (void*) 1, NORMAL_PRIORITY,
-	NULL);
-	xTaskCreate(vHeartBeatTask, "HeartBeatTask", 128, (void*) 1,
-	NORMAL_PRIORITY, NULL);
-	xTaskCreate(vSen0335Task, "Sen0335Task", 128, (void*) 1, NORMAL_PRIORITY,
-	NULL);
+	xTaskCreate(vAnalogTask, "AnalogTask", 256, (void*) 1, HIGH_PRIORITY, NULL);
+	xTaskCreate(vHeartBeatTask, "HeartBeatTask", 128, (void*) 1, NORMAL_PRIORITY, NULL);
+	xTaskCreate(vSen0335Task, "Sen0335Task", 128, (void*) 1, NORMAL_PRIORITY, NULL);
 	xTaskCreate(vLCDTask, "LCDTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vVeml7700Task, "Veml7700Task", 128, (void*) 1, NORMAL_PRIORITY,
-	NULL);
-	xTaskCreate(vEthernetTask, "EthernetTask", 256, (void*) 1, NORMAL_PRIORITY,
-	NULL);
+	xTaskCreate(vVeml7700Task, "Veml7700Task", 128, (void*) 1, NORMAL_PRIORITY, NULL);
+	xTaskCreate(vEthernetTask, "EthernetTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
 	/* USER CODE END RTOS_THREADS */
 
 	/* USER CODE BEGIN RTOS_EVENTS */
@@ -211,14 +207,17 @@ void vAnalogTask(void *pvParameters) {
 
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
-	uint16_t AdcValue[3];
-	//	AdcValue = pvPortMalloc(32 * sizeof(uint16_t));
-	HAL_ADC_Start_DMA(&hadc1, (uint32_t*) AdcValue, 3);
+	uint16_t *AdcRawValue;
+	uint16_t *Resault;
+
+	AdcRawValue = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t)); // Adc will be created on FreeRTOS heap instead of task heap
+	Resault = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t));
+	HAL_ADC_Start_DMA(&hadc1, (uint32_t*) AdcRawValue, 3);
 
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
 
-	for (;;) {
-		vQueueAnalogSend(AdcValue, 3);
+	for (;;) {;
+		vQueueAnalogSend(xCalcAdc(AdcRawValue, Resault), ADC_SAMPLES);
 	}
 	vTaskDelay(xDelay);
 }
@@ -230,7 +229,8 @@ void vSen0335Task(void *pvParameters) {
 
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
 
-//	uint16_t SEN0335Value[3] = { 0 };
+	uint16_t *Sen0335Value;
+	Sen0335Value = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t));
 
 	for (;;) {
 
@@ -255,13 +255,15 @@ void vLCDTask(void *pvParameters) {
 
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
 
-	uint16_t AdcValue[3];
+	uint16_t *AdcValue;
+	AdcValue = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t));
 
 	for (;;) {
 		vQueueAnalogReceive(AdcValue, 3);
-		printf("RainSensor: %d\n\r", AdcValue[0]);
-		printf("MoistureSensor: %d\n\r", AdcValue[1]);
-		printf("Battery: %d\n\r", AdcValue[2]);
+
+		printf("RainSensor: %d%%\n\r", AdcValue[0]);
+		printf("Moisture: %d%%\n\r", AdcValue[1]);
+		printf("Battery: %d%%\n\r", AdcValue[2]);
 
 		vTaskDelay(xDelay);
 	}
@@ -270,6 +272,9 @@ void vLCDTask(void *pvParameters) {
 /* Digital Ambient Light Sensor */
 void vVeml7700Task(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
+
+	uint16_t *Veml7700Value;
+	Veml7700Value = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t));
 
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
 
@@ -284,13 +289,22 @@ void vEthernetTask(void *pvParameters) {
 
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
 
-	uint16_t AdcValue[3];
+	uint16_t *AdcValue;
+	AdcValue = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t));
 
 	for (;;) {
 
 		vQueueAnalogReceive(AdcValue, 3);
 		vTaskDelay(xDelay);
 	}
+}
+
+
+void _putchar(char character) {
+// send char to console etc.
+	xSemaphoreTake(xMutexPrintf, portMAX_DELAY);
+	HAL_UART_Transmit(&huart3, (uint8_t*) &character, 1, 1000);
+	xSemaphoreGive(xMutexPrintf);
 }
 
 void vTimerCallback(TimerHandle_t xTimer) {
@@ -306,29 +320,5 @@ void vTimerCallback(TimerHandle_t xTimer) {
 
 }
 
-void _putchar(char character) {
-// send char to console etc.
-	xSemaphoreTake(xMutexPrintf, portMAX_DELAY);
-	HAL_UART_Transmit(&huart3, (uint8_t*) &character, 1, 1000);
-	xSemaphoreGive(xMutexPrintf);
-}
-
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-	if (USER_Btn_Pin == GPIO_Pin) {
-		HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
-	}
-}
-
-void HAL_ADC_LevelOutOfWindowCallback(ADC_HandleTypeDef *hadc) {
-	if (hadc->Instance == ADC1) {
-		HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
-	}
-}
-
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
-	if (hadc->Instance == ADC1) {
-
-	}
-}
 /* USER CODE END Application */
 
