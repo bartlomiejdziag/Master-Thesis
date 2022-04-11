@@ -19,14 +19,13 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "lwip.h"
+#include "i2c.h"
 #include "usart.h"
-#include "usb_otg.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,18 +45,41 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-extern struct netif gnetif;
+//extern struct netif gnetif;
+struct I2C_Module
+{
+  I2C_HandleTypeDef   instance;
+  uint16_t            sdaPin;
+  GPIO_TypeDef*       sdaPort;
+  uint16_t            sclPin;
+  GPIO_TypeDef*       sclPort;
+};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
+void I2C_ClearBusyFlagErratum(struct I2C_Module* i2c);
+/* Direct printf to output somewhere */
+#ifdef __GNUC__
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#else
+#define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
+#endif /* __GNUC__ */
+
+#ifndef __UUID_H
+#define __UUID_H
+//#define STM32_UUID ((uint32_t *)0x1FF0F420)
+#define STM32_UUID ((uint32_t *)UID_BASE)
+#endif //__UUID_H
+
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void ethernetif_notify_conn_changed(struct netif *netif);
+//void ethernetif_notify_conn_changed(struct netif *netif);
+//static void MX_NVIC_Init(void);
 /* USER CODE END 0 */
 
 /**
@@ -88,19 +110,57 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_USB_OTG_FS_PCD_Init();
   MX_USART3_UART_Init();
-  MX_LWIP_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-  ethernetif_notify_conn_changed(&gnetif);
+//  HAL_I2C_MspInit(&hi2c1);
+//  I2C_ClearBusyFlagErratum(&hi2c1);
+     char uart2Data[25] = "Connected to UART Three\r\n";
+        /*
+         * Output to uart2
+         * use screen or putty or whatever terminal software
+         * 8N1 115200
+         */
+        HAL_UART_Transmit(&huart3, (uint8_t *)&uart2Data,sizeof(uart2Data), 0xFFFF);
+
+      	printf("\r\n");
+
+      	printf("Scanning I2C bus:\r\n");
+     	HAL_StatusTypeDef result;
+      	uint8_t i;
+      	for (i=1; i<128; i++)
+      	{
+      	  /*
+      	   * the HAL wants a left aligned i2c address
+      	   * &hi2c1 is the handle
+      	   * (uint16_t)(i<<1) is the i2c address left aligned
+      	   * retries 2
+      	   * timeout 2
+      	   */
+//      		HAL_I2C_Master_Transmit(&hi2c1, 0xA7, uart2Data, 3, 3);
+      	  result = HAL_I2C_IsDeviceReady(&hi2c1, (uint16_t)(i<<1), 10, 10);
+//      	hi2c1.Instance->CR1 &= ~(0x0001);
+      	  if (result != HAL_OK) // HAL_ERROR or HAL_BUSY or HAL_TIMEOUT
+      	  {
+      		  printf("."); // No ACK received at that address
+      	  }
+      	  if (result == HAL_OK)
+      	  {
+      		  printf("0x%X", i); // Received an ACK at that address
+      	  }
+      	}
+      	printf("\r\n");
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  MX_LWIP_Process();
-
+//	  MX_LWIP_Process();
+	  HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
+	  HAL_Delay(500);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -116,7 +176,6 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
 
   /** Configure LSE Drive Capability
   */
@@ -159,32 +218,115 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_USART3|RCC_PERIPHCLK_CLK48;
-  PeriphClkInitStruct.Usart3ClockSelection = RCC_USART3CLKSOURCE_PCLK1;
-  PeriphClkInitStruct.Clk48ClockSelection = RCC_CLK48SOURCE_PLL;
-  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
-  {
-    Error_Handler();
-  }
 }
 
 /* USER CODE BEGIN 4 */
 
-void ethernetif_notify_conn_changed(struct netif *netif)
+PUTCHAR_PROTOTYPE
 {
-	/* NOTE : This is function could be implemented in user file
-	 when the callback is needed */
-	if (netif_is_link_up(netif))
-	{
-		HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
-		HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
-	}
-	else
-	{
-		HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-	}
+  /* Place your implementation of fputc here */
+  /* e.g. write a character to the USART2 and Loop until the end of transmission */
+  HAL_UART_Transmit(&huart3, (uint8_t *)&ch, 1, 0xFFFF);
+
+  return ch;
+
 }
+
+void I2C_ClearBusyFlagErratum(struct I2C_Module* i2c)
+{
+  GPIO_InitTypeDef GPIO_InitStructure;
+
+  // 1. Clear PE bit.
+  i2c->instance.Instance->CR1 &= ~(0x0001);
+
+  //  2. Configure the SCL and SDA I/Os as General Purpose Output Open-Drain, High level (Write 1 to GPIOx_ODR).
+  GPIO_InitStructure.Mode         = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStructure.Alternate    = GPIO_AF4_I2C1;
+  GPIO_InitStructure.Pull         = GPIO_PULLUP;
+  GPIO_InitStructure.Speed        = GPIO_SPEED_FREQ_HIGH;
+
+  GPIO_InitStructure.Pin          = i2c->sclPin;
+  HAL_GPIO_Init(i2c->sclPort, &GPIO_InitStructure);
+  HAL_GPIO_WritePin(i2c->sclPort, i2c->sclPin, GPIO_PIN_SET);
+
+  GPIO_InitStructure.Pin          = i2c->sdaPin;
+  HAL_GPIO_Init(i2c->sdaPort, &GPIO_InitStructure);
+  HAL_GPIO_WritePin(i2c->sdaPort, i2c->sdaPin, GPIO_PIN_SET);
+
+  // 3. Check SCL and SDA High level in GPIOx_IDR.
+  while (GPIO_PIN_SET != HAL_GPIO_ReadPin(i2c->sclPort, i2c->sclPin))
+  {
+    asm("nop");
+  }
+
+  while (GPIO_PIN_SET != HAL_GPIO_ReadPin(i2c->sdaPort, i2c->sdaPin))
+  {
+    asm("nop");
+  }
+
+  // 4. Configure the SDA I/O as General Purpose Output Open-Drain, Low level (Write 0 to GPIOx_ODR).
+  HAL_GPIO_WritePin(i2c->sdaPort, i2c->sdaPin, GPIO_PIN_RESET);
+
+  //  5. Check SDA Low level in GPIOx_IDR.
+  while (GPIO_PIN_RESET != HAL_GPIO_ReadPin(i2c->sdaPort, i2c->sdaPin))
+  {
+    asm("nop");
+  }
+
+  // 6. Configure the SCL I/O as General Purpose Output Open-Drain, Low level (Write 0 to GPIOx_ODR).
+  HAL_GPIO_WritePin(i2c->sclPort, i2c->sclPin, GPIO_PIN_RESET);
+
+  //  7. Check SCL Low level in GPIOx_IDR.
+  while (GPIO_PIN_RESET != HAL_GPIO_ReadPin(i2c->sclPort, i2c->sclPin))
+  {
+    asm("nop");
+  }
+
+  // 8. Configure the SCL I/O as General Purpose Output Open-Drain, High level (Write 1 to GPIOx_ODR).
+  HAL_GPIO_WritePin(i2c->sclPort, i2c->sclPin, GPIO_PIN_SET);
+
+  // 9. Check SCL High level in GPIOx_IDR.
+  while (GPIO_PIN_SET != HAL_GPIO_ReadPin(i2c->sclPort, i2c->sclPin))
+  {
+    asm("nop");
+  }
+
+  // 10. Configure the SDA I/O as General Purpose Output Open-Drain , High level (Write 1 to GPIOx_ODR).
+  HAL_GPIO_WritePin(i2c->sdaPort, i2c->sdaPin, GPIO_PIN_SET);
+
+  // 11. Check SDA High level in GPIOx_IDR.
+  while (GPIO_PIN_SET != HAL_GPIO_ReadPin(i2c->sdaPort, i2c->sdaPin))
+  {
+    asm("nop");
+  }
+
+  // 12. Configure the SCL and SDA I/Os as Alternate function Open-Drain.
+  GPIO_InitStructure.Mode         = GPIO_MODE_AF_OD;
+  GPIO_InitStructure.Alternate    = GPIO_AF4_I2C1;
+
+  GPIO_InitStructure.Pin          = i2c->sclPin;
+  HAL_GPIO_Init(i2c->sclPort, &GPIO_InitStructure);
+
+  GPIO_InitStructure.Pin          = i2c->sdaPin;
+  HAL_GPIO_Init(i2c->sdaPort, &GPIO_InitStructure);
+
+  // 13. Set SWRST bit in I2Cx_CR1 register.
+  i2c->instance.Instance->CR1 |= 0x8000;
+
+  asm("nop");
+
+  // 14. Clear SWRST bit in I2Cx_CR1 register.
+  i2c->instance.Instance->CR1 &= ~0x8000;
+
+  asm("nop");
+
+  // 15. Enable the I2C peripheral by setting the PE bit in I2Cx_CR1 register
+  i2c->instance.Instance->CR1 |= 0x0001;
+
+  // Call initialization function.
+  HAL_I2C_Init(&(i2c->instance));
+}
+
 /* USER CODE END 4 */
 
 /**
@@ -219,4 +361,3 @@ void assert_failed(uint8_t *file, uint32_t line)
 }
 #endif /* USE_FULL_ASSERT */
 
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
