@@ -31,6 +31,7 @@
 #include "i2c.h"
 #include "adc.h"
 #include "semphr.h"
+#include "Veml7700.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -56,14 +57,17 @@
 
 SemaphoreHandle_t xMutexPrintf, xMutexIdle;
 QueueHandle_t xAnalogQueue, xI2CQueue;
-TimerHandle_t xTimers;
+TimerHandle_t xTimerIdle;
+TimerHandle_t xTimerDelay;
 uint32_t IdleTicks;
-
 /* USER CODE END Variables */
 /* Definitions for DefaultTask */
 osThreadId_t DefaultTaskHandle;
-const osThreadAttr_t DefaultTask_attributes = { .name = "DefaultTask",
-		.stack_size = 128 * 4, .priority = (osPriority_t) osPriorityNormal, };
+const osThreadAttr_t DefaultTask_attributes = {
+  .name = "DefaultTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -82,7 +86,12 @@ static void vQueueAnalogSend(uint16_t *val, uint8_t pvItemToQueue) {
 
 static inline uint16_t* xCalcAdc(uint16_t *adc, uint16_t *resault) {
 	for (uint8_t i = 0; i < ADC_SAMPLES; i++) {
-		resault[i] = ((adc[i] * 100U) / 4096U);
+		if (i != 2) {
+			resault[i] = ((adc[i] * 100U) / 4096U);
+		} else {
+			resault[i] = ((adc[i] * 100U) / 1024U);
+		}
+
 	}
 	return resault;
 }
@@ -94,7 +103,7 @@ void vLCDTask(void *pvParameters);
 void vVeml7700Task(void *pvParameters);
 void vEthernetTask(void *pvParameters);
 void vHeartBeatTask(void *pvParameters);
-void vTimerCallback(TimerHandle_t xTimer);
+void vTimerIdleCallback(TimerHandle_t xTimer);
 /* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void *argument);
@@ -112,9 +121,9 @@ void vApplicationIdleHook(void) {
 	static uint32_t LastTick;
 
 	if (LastTick < osKernelGetTickCount()) {
-		xSemaphoreTake(xMutexPrintf, portMAX_DELAY);
+		xSemaphoreTake(xMutexIdle, portMAX_DELAY);
 		IdleTicks++;
-		xSemaphoreGive(xMutexPrintf);
+		xSemaphoreGive(xMutexIdle);
 		LastTick = osKernelGetTickCount();
 	}
 }
@@ -127,54 +136,53 @@ void vApplicationMallocFailedHook(void) {
 /* USER CODE END 5 */
 
 /**
- * @brief  FreeRTOS initialization
- * @param  None
- * @retval None
- */
+  * @brief  FreeRTOS initialization
+  * @param  None
+  * @retval None
+  */
 void MX_FREERTOS_Init(void) {
-	/* USER CODE BEGIN Init */
+  /* USER CODE BEGIN Init */
 
-	/* USER CODE END Init */
+  /* USER CODE END Init */
 
-	/* USER CODE BEGIN RTOS_MUTEX */
+  /* USER CODE BEGIN RTOS_MUTEX */
 	/* add mutexes, ... */
 	xMutexPrintf = xSemaphoreCreateMutex();
 	xMutexIdle = xSemaphoreCreateMutex();
-	/* USER CODE END RTOS_MUTEX */
+  /* USER CODE END RTOS_MUTEX */
 
-	/* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
 	/* add semaphores, ... */
-	/* USER CODE END RTOS_SEMAPHORES */
+  /* USER CODE END RTOS_SEMAPHORES */
 
-	/* USER CODE BEGIN RTOS_TIMERS */
+  /* USER CODE BEGIN RTOS_TIMERS */
 	/* start timers, add new ones, ... */
-	xTimers = xTimerCreate("Timer", 1000, pdTRUE, (void*) 0, vTimerCallback);
-	/* USER CODE END RTOS_TIMERS */
+	xTimerIdle = xTimerCreate("TimerIdle", 1000, pdTRUE, (void*) 0, vTimerIdleCallback);
+  /* USER CODE END RTOS_TIMERS */
 
-	/* USER CODE BEGIN RTOS_QUEUES */
+  /* USER CODE BEGIN RTOS_QUEUES */
 	/* add queues, ... */
 	xAnalogQueue = xQueueCreate(10, sizeof(uint16_t));
 	xI2CQueue = xQueueCreate(10, sizeof(uint16_t));
-	/* USER CODE END RTOS_QUEUES */
+  /* USER CODE END RTOS_QUEUES */
 
-	/* Create the thread(s) */
-	/* creation of DefaultTask */
-	DefaultTaskHandle = osThreadNew(StartDefaultTask, NULL,
-			&DefaultTask_attributes);
+  /* Create the thread(s) */
+  /* creation of DefaultTask */
+	DefaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &DefaultTask_attributes);
 
-	/* USER CODE BEGIN RTOS_THREADS */
+  /* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
 	xTaskCreate(vAnalogTask, "AnalogTask", 256, (void*) 1, HIGH_PRIORITY, NULL);
 	xTaskCreate(vHeartBeatTask, "HeartBeatTask", 128, (void*) 1, NORMAL_PRIORITY, NULL);
 	xTaskCreate(vSen0335Task, "Sen0335Task", 128, (void*) 1, NORMAL_PRIORITY, NULL);
 	xTaskCreate(vLCDTask, "LCDTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vVeml7700Task, "Veml7700Task", 128, (void*) 1, NORMAL_PRIORITY, NULL);
+	xTaskCreate(vVeml7700Task, "Veml7700Task", 256, (void*) 1, HIGH_PRIORITY, NULL);
 	xTaskCreate(vEthernetTask, "EthernetTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	/* USER CODE END RTOS_THREADS */
+  /* USER CODE END RTOS_THREADS */
 
-	/* USER CODE BEGIN RTOS_EVENTS */
+  /* USER CODE BEGIN RTOS_EVENTS */
 	/* add events, ... */
-	/* USER CODE END RTOS_EVENTS */
+  /* USER CODE END RTOS_EVENTS */
 
 }
 
@@ -185,18 +193,19 @@ void MX_FREERTOS_Init(void) {
  * @retval None
  */
 /* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument) {
-	/* init code for LWIP */
+void StartDefaultTask(void *argument)
+{
+  /* init code for LWIP */
 //  MX_LWIP_Init();
-	/* USER CODE BEGIN StartDefaultTask */
-	if ( xTimerStart( xTimers, 0 ) != pdPASS) {
+  /* USER CODE BEGIN StartDefaultTask */
+	if ( xTimerStart( xTimerIdle, 0 ) != pdPASS) {
 		printf("Timer not created\n\r");
 	}
 	/* Infinite loop */
 	for (;;) {
 		osDelay(1);
 	}
-	/* USER CODE END StartDefaultTask */
+  /* USER CODE END StartDefaultTask */
 }
 
 /* Private application code --------------------------------------------------*/
@@ -272,13 +281,27 @@ void vLCDTask(void *pvParameters) {
 /* Digital Ambient Light Sensor */
 void vVeml7700Task(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
-
-	uint16_t *Veml7700Value;
-	Veml7700Value = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t));
-
+	static uint32_t LastTick = 0;
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
 
+	VEML7700_TypeDef Veml7700;
+	Veml7700_Init(&Veml7700, &hi2c1, VEML7700_ADDR);
+	Veml7700_Set_Als_Integration_Time(&Veml7700, REG_ALS_CONF_IT_50);
+	VEML7700_Set_PSM(&Veml7700, REG_POWER_SAVING_PSM_2);
+
 	for (;;) {
+		Veml7700_Power_On(&Veml7700);
+
+		if (LastTick < osKernelGetTickCount()) {
+			IdleTicks++;
+			LastTick = osKernelGetTickCount();
+		}
+		uint16_t als = VEML7700_read_als(&Veml7700);
+		uint16_t white = VEML7700_read_white(&Veml7700);
+		Veml7700_Shutdown(&Veml7700);
+
+		printf("ALS : %d\r\n", als);
+		printf("White : %d\r\n", white);
 		vTaskDelay(xDelay);
 	}
 }
@@ -307,17 +330,17 @@ void _putchar(char character) {
 	xSemaphoreGive(xMutexPrintf);
 }
 
-void vTimerCallback(TimerHandle_t xTimer) {
+void vTimerIdleCallback(TimerHandle_t xTimer) {
+	configASSERT(xTimer);
 
 	uint32_t IdleTime;
-	xSemaphoreTake(xMutexPrintf, portMAX_DELAY);
+	xSemaphoreTake(xMutexIdle, portMAX_DELAY);
 	IdleTime = (IdleTicks * 100) / 1000;
-	xSemaphoreGive(xMutexPrintf);
+	xSemaphoreGive(xMutexIdle);
 
 	IdleTicks = 0;
 
 	printf("Idle Time: %d%%\n\r", IdleTime);
-
 }
 
 /* USER CODE END Application */
