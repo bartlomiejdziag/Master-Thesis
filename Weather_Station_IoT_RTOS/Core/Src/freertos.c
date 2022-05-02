@@ -72,15 +72,15 @@ const osThreadAttr_t DefaultTask_attributes = {
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
 
-static void vQueueAnalogReceive(uint16_t *val, uint8_t pvItemToQueue) {
+static void vQueueReceive(QueueHandle_t Queue, uint16_t *val, uint8_t pvItemToQueue) {
 	for (uint8_t i = 0; i <= pvItemToQueue; i++) {
-		xQueueReceive(xAnalogQueue, &(val[i]), portMAX_DELAY);
+		xQueueReceive(Queue, &(val[i]), portMAX_DELAY);
 	}
 }
 
-static void vQueueAnalogSend(uint16_t *val, uint8_t pvItemToQueue) {
+static void vQueueSend(QueueHandle_t Queue, uint16_t *val, uint8_t pvItemToQueue) {
 	for (uint8_t i = 0; i <= pvItemToQueue; i++) {
-		xQueueSend(xAnalogQueue, &val[i], portMAX_DELAY);
+		xQueueSend(Queue, &val[i], portMAX_DELAY);
 	}
 }
 
@@ -163,7 +163,7 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN RTOS_QUEUES */
 	/* add queues, ... */
 	xAnalogQueue = xQueueCreate(10, sizeof(uint16_t));
-	xI2CQueue = xQueueCreate(10, sizeof(uint16_t));
+	xI2CQueue = xQueueCreate(10, sizeof(double));
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -226,7 +226,7 @@ void vAnalogTask(void *pvParameters) {
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
 
 	for (;;) {;
-		vQueueAnalogSend(xCalcAdc(AdcRawValue, Resault), ADC_SAMPLES);
+		vQueueSend(xAnalogQueue, xCalcAdc(AdcRawValue, Resault), ADC_SAMPLES);
 	}
 	vTaskDelay(xDelay);
 }
@@ -266,13 +266,18 @@ void vLCDTask(void *pvParameters) {
 
 	uint16_t *AdcValue;
 	AdcValue = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t));
+	uint16_t *I2CValue;
+	I2CValue = pvPortMalloc(2 * sizeof(uint16_t));
 
 	for (;;) {
-		vQueueAnalogReceive(AdcValue, 3);
+		vQueueReceive(xAnalogQueue, AdcValue, 3);
+		vQueueReceive(xI2CQueue, I2CValue, 2);
 
 		printf("RainSensor: %d%%\n\r", AdcValue[0]);
 		printf("Moisture: %d%%\n\r", AdcValue[1]);
 		printf("Battery: %d%%\n\r", AdcValue[2]);
+		printf("ALS : %d lx\r\n", I2CValue[0]);
+		printf("White : %d\r\n", I2CValue[1]);
 
 		vTaskDelay(xDelay);
 	}
@@ -281,27 +286,30 @@ void vLCDTask(void *pvParameters) {
 /* Digital Ambient Light Sensor */
 void vVeml7700Task(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
-	static uint32_t LastTick = 0;
+
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
+	uint16_t als, white;
+	uint16_t calc_values[2];
 
 	VEML7700_TypeDef Veml7700;
-	Veml7700_Init(&Veml7700, &hi2c1, VEML7700_ADDR);
-	Veml7700_Set_Als_Integration_Time(&Veml7700, REG_ALS_CONF_IT_50);
+	Veml7700_Init(&Veml7700, &hi2c1, VEML7700_ADDR); // gain x2
+	Veml7700_Set_Als_Integration_Time(&Veml7700, REG_ALS_CONF_IT_25); //25ms
 	VEML7700_Set_PSM(&Veml7700, REG_POWER_SAVING_PSM_2);
 
 	for (;;) {
 		Veml7700_Power_On(&Veml7700);
+		vTaskDelay(28);
 
-		if (LastTick < osKernelGetTickCount()) {
-			IdleTicks++;
-			LastTick = osKernelGetTickCount();
-		}
-		uint16_t als = VEML7700_read_als(&Veml7700);
-		uint16_t white = VEML7700_read_white(&Veml7700);
+		als = VEML7700_read_als(&Veml7700);
+		white = VEML7700_read_white(&Veml7700);
+
 		Veml7700_Shutdown(&Veml7700);
 
-		printf("ALS : %d\r\n", als);
-		printf("White : %d\r\n", white);
+		calc_values[0] = (als * VEML7700_RESOLUTION);
+		calc_values[1] = (white * VEML7700_RESOLUTION);
+
+		vQueueSend(xI2CQueue, calc_values, 2);
+
 		vTaskDelay(xDelay);
 	}
 }
@@ -317,7 +325,7 @@ void vEthernetTask(void *pvParameters) {
 
 	for (;;) {
 
-		vQueueAnalogReceive(AdcValue, 3);
+		vQueueReceive(xAnalogQueue, AdcValue, 3);
 		vTaskDelay(xDelay);
 	}
 }

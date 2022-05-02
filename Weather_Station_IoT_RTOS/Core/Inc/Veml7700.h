@@ -9,6 +9,7 @@
 #define INC_VEML7700_H_
 
 #define VEML7700_ADDR 0x10
+#define VEML7700_RESOLUTION 0.1152  // Check documentation for more details
 
 // VEML REGISTERS
 #define VEML7700_CONF 0x00U
