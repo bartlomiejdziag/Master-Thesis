@@ -1,7 +1,6 @@
 #include "main.h"
 #include "i2c.h"
 #include "Veml7700.h"
-#include "printf.h"
 
 static uint16_t read_register(VEML7700_TypeDef *VEML7700, uint8_t Register) {
 	uint8_t Value[2] = { 0 };
