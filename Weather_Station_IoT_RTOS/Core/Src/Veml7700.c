@@ -77,7 +77,7 @@ uint32_t VEML7700_Set_PSM(VEML7700_TypeDef *VEML7700, uint16_t psm_mode) {
 	uint16_t config = read_register(VEML7700, VEML7700_PWR_SAVE);
 	config &= REG_POWER_SAVING_PSM_4;
 	config |= psm_mode;
-	return write_register(VEML7700, VEML7700_PWR_SAVE, psm_mode);
+	return write_register(VEML7700, VEML7700_PWR_SAVE, config);
 }
 
 uint16_t VEML7700_read_als(VEML7700_TypeDef *VEML7700) {
