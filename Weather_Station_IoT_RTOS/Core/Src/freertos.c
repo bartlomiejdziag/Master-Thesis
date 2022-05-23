@@ -255,10 +255,11 @@ void vBme680Task(void *pvParameters) {
 	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
 
 	BME680_TypeDef Bme680;
+	BME680_Calib_TypeDef Bme680_calib;
 
 	xSemaphoreTake(xMutexI2C, portMAX_DELAY);
-	Bme680_Init(&Bme680, &hi2c1, BME680_ADDR);
-	Bme680_Set_Conf(&Bme680, BME680_OSRS_T_OVR_SAMPLING_2, BME680_OSRS_H_OVR_SAMPLING_1, BME680_OSRS_P_OVR_SAMPLING_16, BME680_FILTER_7);
+	Bme680_Init(&Bme680, &Bme680_calib, &hi2c1, BME680_ADDR);
+	Bme680_Set_Conf(&Bme680, BME680_OSRS_T_OVR_SAMPLING_2, BME680_OSRS_H_OVR_SAMPLING_2, BME680_OSRS_P_OVR_SAMPLING_4, BME680_FILTER_7);
 	Bme680_Run_Gas(&Bme680);
 	Bme680_Set_Gas_Conf(&Bme680, Bme680.Gas_heat_dur);
 	xSemaphoreGive(xMutexI2C);
@@ -266,9 +267,11 @@ void vBme680Task(void *pvParameters) {
 	for (;;) {
 		xSemaphoreTake(xMutexI2C, portMAX_DELAY);
 		Bme680_Set_Mode(&Bme680, BME680_MODE_FORCE);
-		printf("Temperature: %d\n\r", Bme680_Read_Temperature(&Bme680));
-		printf("Pressure: %d\n\r", Bme680_Read_Pressure(&Bme680));
-		printf("Humidity: %d\n\r", Bme680_Read_Humidity(&Bme680));
+		calc_raw_values(&Bme680, &Bme680_calib);
+		printf("Temperature: %d °C\n\r", (Bme680.Temperature_Calc / 100U));
+		printf("Pressure: %d hPa\n\r", (Bme680.Pressure_Calc / 100U));
+		printf("Humidity: %d %%rH\n\r", (Bme680.Humidity_Calc / 1000U));
+//		printf("Gas: %d ohms\n\r", Bme680.Gas_Calc);
 		Bme680_Set_Mode(&Bme680, BME680_MODE_SLEEP);
 		xSemaphoreGive(xMutexI2C);
 		vTaskDelay(xDelay);
