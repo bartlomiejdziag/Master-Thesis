@@ -278,7 +278,7 @@ void vBme680Task(void *pvParameters) {
 	}
 }
 
-/* HeartBeat Task */
+/* HeartBeat Task */w
 void vHeartBeatTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
