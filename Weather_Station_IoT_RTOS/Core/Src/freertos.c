@@ -29,10 +29,12 @@
 #include "printf.h"
 #include "usart.h"
 #include "i2c.h"
+#include "spi.h"
 #include "adc.h"
 #include "semphr.h"
 #include "Veml7700.h"
 #include "Bme680.h"
+#include "TFT_ILI9341.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -189,10 +191,10 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
 	xTaskCreate(vAnalogTask, "AnalogTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vHeartBeatTask, "HeartBeatTask", 128, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vBme680Task, "Bme680Task", 256, (void*) 1, HIGH_PRIORITY, NULL);
-	xTaskCreate(vLCDTask, "LCDTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vVeml7700Task, "Veml7700Task", 256, (void*) 1, HIGH_PRIORITY, NULL);
+	xTaskCreate(vHeartBeatTask, "HeartBeatTask", 128, (void*) 1, LOW_PRIORITY, NULL);
+	xTaskCreate(vBme680Task, "Bme680Task", 256, (void*) 1, NORMAL_PRIORITY, NULL);
+	xTaskCreate(vLCDTask, "LCDTask", 512, (void*) 1, HIGH_PRIORITY, NULL);
+	xTaskCreate(vVeml7700Task, "Veml7700Task", 256, (void*) 1, NORMAL_PRIORITY, NULL);
 	xTaskCreate(vEthernetTask, "EthernetTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
   /* USER CODE END RTOS_THREADS */
 
@@ -239,7 +241,7 @@ void vAnalogTask(void *pvParameters) {
 	Resault = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t));
 	HAL_ADC_Start_DMA(&hadc1, (uint32_t*) AdcRawValue, 3);
 
-	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
+	const TickType_t xDelay = 100 / portTICK_PERIOD_MS;
 
 	for (;;) {
 		vQueueSend(xAnalogQueue, xCalcAdc(AdcRawValue, Resault), ADC_SAMPLES);
@@ -252,7 +254,7 @@ void vBme680Task(void *pvParameters) {
 
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
-	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
+	const TickType_t xDelay = 100 / portTICK_PERIOD_MS;
 
 	BME680_TypeDef Bme680;
 	BME680_Calib_TypeDef Bme680_calib;
@@ -268,9 +270,9 @@ void vBme680Task(void *pvParameters) {
 		xSemaphoreTake(xMutexI2C, portMAX_DELAY);
 		Bme680_Set_Mode(&Bme680, BME680_MODE_FORCE);
 		calc_raw_values(&Bme680, &Bme680_calib);
-		printf("Temperature: %d °C\n\r", (Bme680.Temperature_Calc / 100U));
-		printf("Pressure: %d hPa\n\r", (Bme680.Pressure_Calc / 100U));
-		printf("Humidity: %d %%rH\n\r", (Bme680.Humidity_Calc / 1000U));
+//		printf("Temperature: %d °C\n\r", (Bme680.Temperature_Calc / 100U));
+//		printf("Pressure: %d hPa\n\r", (Bme680.Pressure_Calc / 100U));
+//		printf("Humidity: %d %%rH\n\r", (Bme680.Humidity_Calc / 1000U));
 //		printf("Gas: %d ohms\n\r", Bme680.Gas_Calc);
 		Bme680_Set_Mode(&Bme680, BME680_MODE_SLEEP);
 		xSemaphoreGive(xMutexI2C);
@@ -278,7 +280,7 @@ void vBme680Task(void *pvParameters) {
 	}
 }
 
-/* HeartBeat Task */w
+/* HeartBeat Task */
 void vHeartBeatTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
@@ -293,24 +295,32 @@ void vHeartBeatTask(void *pvParameters) {
 void vLCDTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
-	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
+	const TickType_t xDelay = 500 / portTICK_PERIOD_MS;
 
 	uint16_t *AdcValue;
 	AdcValue = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t));
 	uint16_t *I2CValue;
 	I2CValue = pvPortMalloc(VEML7700_SAMPLES * sizeof(uint16_t));
 
+	ILI9341_Init(&hspi1);
+	for(uint16_t i = 0; i < ILI9341_TFTWIDTH; i++)
+	{
+		for(uint16_t j = 0; j < ILI9341_TFTHEIGHT; j++)
+		{
+			ILI9341_DrawPixel(i, j, ILI9341_BLUE);
+		}
+	}
 	for (;;) {
 		vQueueReceive(xAnalogQueue, AdcValue, 3);
 		vQueueReceive(xI2CQueue, I2CValue, 2);
 
-		printf("------------------------------\n\r");
-		printf("RainSensor: %d%%\n\r", AdcValue[0]);
-		printf("Moisture: %d%%\n\r", AdcValue[1]);
-		printf("Battery: %d%%\n\r", AdcValue[2]);
-		printf("ALS : %d lx\n\r", I2CValue[0]);
-		printf("White : %d\n\r", I2CValue[1]);
-		printf("------------------------------\n\r");
+//		printf("------------------------------\n\r");
+//		printf("RainSensor: %d%%\n\r", AdcValue[0]);
+//		printf("Moisture: %d%%\n\r", AdcValue[1]);
+//		printf("Battery: %d%%\n\r", AdcValue[2]);
+//		printf("ALS : %d lx\n\r", I2CValue[0]);
+//		printf("White : %d\n\r", I2CValue[1]);
+//		printf("------------------------------\n\r");
 
 		vTaskDelay(xDelay);
 	}
@@ -320,7 +330,7 @@ void vLCDTask(void *pvParameters) {
 void vVeml7700Task(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
-	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
+	const TickType_t xDelay = 100 / portTICK_PERIOD_MS;
 
 	uint16_t als, white;
 	uint16_t* calc_values;

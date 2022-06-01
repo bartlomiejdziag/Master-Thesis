@@ -1,5 +1,6 @@
 #include "main.h"
 #include "FreeRTOS.h"
+#include "task.h"
 #include "i2c.h"
 #include "Bme680.h"
 
