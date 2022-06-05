@@ -10,6 +10,14 @@
 #include "task.h"
 #include "TFT_ILI9341.h"
 
+#define MADCTL_MY 0x80  ///< Bottom to top
+#define MADCTL_MX 0x40  ///< Right to left
+#define MADCTL_MV 0x20  ///< Reverse Mode
+#define MADCTL_ML 0x10  ///< LCD refresh Bottom to top
+#define MADCTL_RGB 0x00 ///< Red-Green-Blue pixel order
+#define MADCTL_BGR 0x08 ///< Blue-Green-Red pixel order
+#define MADCTL_MH 0x04  ///< LCD refresh right to left
+
 SPI_HandleTypeDef *Tft_hspi;
 
 /* Delay function */
@@ -23,8 +31,21 @@ static void ILI9341_Delay(uint32_t ms)
 }
 
 static void ILI9341_SendToTFT(uint8_t *Byte, uint32_t Length)
-{
+ {
+#if (ILI9341_OPTIMIZE_HAL_SPI == 1)
+	while (Length > 0U) {
+		/* Wait until TXE flag is set to send data */
+		if (__HAL_SPI_GET_FLAG(Tft_hspi, SPI_FLAG_TXE)) {
+			*((__IO uint8_t*) &Tft_hspi->Instance->DR) = (*Byte);
+			Byte++;
+			Length--;
+		}
+	}
+	while (__HAL_SPI_GET_FLAG(Tft_hspi, SPI_FLAG_BSY) != RESET)
+		;
+#else
 	HAL_SPI_Transmit(Tft_hspi, Byte, Length, ILI9341_SPI_TIMEOUT);
+#endif
 }
 
 static void ILI9341_SendCommand(uint8_t Command)
@@ -62,7 +83,7 @@ static void ILI9341_SendData16(uint16_t Data)
 #endif
 }
 
-static void ILI9341_SendCommandAndData(uint8_t Command, uint8_t *Data, uint16_t Length)
+static void ILI9341_SendCommandAndData(uint8_t Command, uint8_t *Data, uint32_t Length)
 {
 	/* CS LOW */
 #if (ILI9341_USE_CS == 1)
@@ -117,6 +138,10 @@ void ILI9341_Init(SPI_HandleTypeDef *hspi) {
 	const uint8_t *addr = initcmd;
 	Tft_hspi = hspi;
 
+#if (ILI9341_OPTIMIZE_HAL_SPI == 1)
+	__HAL_SPI_ENABLE(Tft_hspi);
+#endif
+
 #if (ILI9341_USE_HW_RESET == 1)
 	ILI9341_RST_LOW;
 	ILI9341_Delay(10);
@@ -136,6 +161,26 @@ void ILI9341_Init(SPI_HandleTypeDef *hspi) {
 			ILI9341_Delay(150);
 		}
 	}
+	ILI9341_SetRotation(ILI9341_ROTATION);
+}
+
+void ILI9341_SetRotation(uint8_t Rotation)
+{
+	if(Rotation > 3)
+		return;
+
+	switch(Rotation)
+	{
+	case 0:
+		Rotation = (MADCTL_MX | MADCTL_BGR);
+	case 1:
+		Rotation = (MADCTL_MV | MADCTL_BGR);
+	case 2:
+		Rotation = (MADCTL_MY | MADCTL_BGR);
+	case 3:
+		Rotation = (MADCTL_MX | MADCTL_MY | MADCTL_MV | MADCTL_BGR);
+	}
+	ILI9341_SendCommandAndData(ILI9341_MADCTL, &Rotation, 1);
 }
 
 void ILI9341_SetAddrWindow(uint16_t x1, uint16_t y1, uint16_t w, uint16_t h) {
@@ -158,10 +203,52 @@ void ILI9341_SetAddrWindow(uint16_t x1, uint16_t y1, uint16_t w, uint16_t h) {
 
 void ILI9341_DrawPixel(int16_t x, int16_t y, uint16_t color) {
 	uint8_t DataToTranfer[2];
-	if ((x >= 0) && (x < ILI9341_TFTHEIGHT) && (y >= 0) && (y < ILI9341_TFTHEIGHT)) {
+	if ((x >= 0) && (x < ILI9341_TFTWIDTH) && (y >= 0) && (y < ILI9341_TFTHEIGHT)) {
 		ILI9341_SetAddrWindow(x, y, 1, 1);
 		DataToTranfer[0] = color >> 8;
 		DataToTranfer[1] = color & 0xFF;
 		ILI9341_SendCommandAndData(ILI9341_RAMWR, DataToTranfer, 2);
 	}
+}
+
+void ILI9341_DrawImage(int16_t x, int16_t y, const uint8_t *img ,uint16_t w, uint16_t h) {
+	if ((x >= 0) && ((x + w) <= ILI9341_TFTWIDTH) && (y >= 0) && ((y + h) <= ILI9341_TFTHEIGHT)) {
+		ILI9341_SetAddrWindow(x, y, w, h);
+		ILI9341_SendCommandAndData(ILI9341_RAMWR, (uint8_t*)img, (w * h * 2));
+	}
+}
+
+void ILI9341_ClearDisplay(uint16_t color, int16_t x, int16_t y, uint16_t w, uint16_t h)
+{
+	ILI9341_SetAddrWindow(x, y, w, h);
+	ILI9341_SendCommand(ILI9341_RAMWR);
+
+#if (ILI9341_OPTIMIZE_HAL_SPI == 1)
+	uint32_t Length = h * w;
+#if (ILI9341_USE_CS == 1)
+	ILI9341_CS_LOW;
+#endif
+	ILI9341_DC_HIGH; // Data mode
+
+	while (Length > 0U) {
+		if (__HAL_SPI_GET_FLAG(Tft_hspi, SPI_FLAG_TXE)) {
+			*((__IO uint8_t*) &Tft_hspi->Instance->DR) = (color >> 8); //MSB color
+			while (__HAL_SPI_GET_FLAG(Tft_hspi, SPI_FLAG_TXE) != SET)
+				;
+			*((__IO uint8_t*) &Tft_hspi->Instance->DR) = (color & 0xFF); // LSB color
+			Length--;
+		}
+	}
+	while (__HAL_SPI_GET_FLAG(Tft_hspi, SPI_FLAG_BSY) != RESET)
+		;
+
+#if (ILI9341_USE_CS == 1)
+	ILI9341_CS_HIGH;
+#endif
+#else // ILI9341_OPTIMIZE_HAL_SPI
+		for(uint32_t i = 0; i < (ILI9341_TFTWIDTH * ILI9341_TFTHEIGHT); i++)
+		{
+			ILI9341_SendData16(color);
+		}
+#endif
 }

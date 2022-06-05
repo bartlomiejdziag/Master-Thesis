@@ -33,7 +33,7 @@
 #define BME680_EAS_STATUS_0_REGISTER 0x1D
 
 /** Coefficient's address */
-#define BME680_COEFF_ADDR1	(0x8a)
+#define BME680_COEFF_ADDR1	(0x89)
 #define BME680_COEFF_ADDR2	(0xe1)
 
 // BME680 Control bits

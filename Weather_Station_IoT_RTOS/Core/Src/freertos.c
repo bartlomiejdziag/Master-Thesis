@@ -25,6 +25,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdarg.h>
 #include "timers.h"
 #include "printf.h"
 #include "usart.h"
@@ -32,9 +33,15 @@
 #include "spi.h"
 #include "adc.h"
 #include "semphr.h"
+
 #include "Veml7700.h"
 #include "Bme680.h"
+
 #include "TFT_ILI9341.h"
+#include "GFX_Color.h"
+#include "GFX_EnhancedFonts.h"
+#include "EnhancedFonts/times_new_roma_12pts_bold.h"
+#include <background.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -90,18 +97,6 @@ static void vQueueSend(QueueHandle_t Queue, uint16_t *val, uint8_t pvItemToQueue
 	}
 }
 
-//static inline uint16_t* xCalcAdc(uint16_t *adc, uint16_t *resault) {
-//	for (uint8_t i = 0; i < ADC_SAMPLES; i++) {
-//		if (i != 2) {
-//			resault[i] = ((adc[i] * 100U) / 4096U);
-//		} else {
-////			resault[i] = (((adc[i] - 171U) * 100U) / 970U);
-//			resault[i] = ((adc[i] * 100U) / 1024U);
-//		}
-//	}
-//	return resault;
-//}
-
 static inline uint16_t* xCalcAdc(uint16_t *adc, uint16_t *resault) {
 	for (uint8_t i = 0; i < ADC_SAMPLES; i++) {
 		if (i != 2) {
@@ -111,6 +106,18 @@ static inline uint16_t* xCalcAdc(uint16_t *adc, uint16_t *resault) {
 		}
 	}
 	return resault;
+}
+
+static void ConvertValuesToTFT(uint16_t PosX, uint16_t PosY, char const *format, ...)
+{
+	va_list args;
+	char buf[256];
+
+	va_start(args, format);
+	vsnprintf(buf, sizeof(buf), format, args);
+	va_end(args);
+//	ILI9341_ClearDisplay(ILI9341_BLACK, PosX, PosY, 38, 12);
+	EF_PutString((const uint8_t*)buf, PosX, PosY, ILI9341_WHITE, BG_COLOR, ILI9341_BLACK);
 }
 
 void vAnalogTask(void *pvParameters);
@@ -221,7 +228,7 @@ void StartDefaultTask(void *argument)
 	}
 	/* Infinite loop */
 	for (;;) {
-		osDelay(1);
+		osDelay(10000);
 	}
   /* USER CODE END StartDefaultTask */
 }
@@ -254,14 +261,14 @@ void vBme680Task(void *pvParameters) {
 
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
-	const TickType_t xDelay = 100 / portTICK_PERIOD_MS;
+	const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
 
 	BME680_TypeDef Bme680;
 	BME680_Calib_TypeDef Bme680_calib;
 
 	xSemaphoreTake(xMutexI2C, portMAX_DELAY);
 	Bme680_Init(&Bme680, &Bme680_calib, &hi2c1, BME680_ADDR);
-	Bme680_Set_Conf(&Bme680, BME680_OSRS_T_OVR_SAMPLING_2, BME680_OSRS_H_OVR_SAMPLING_2, BME680_OSRS_P_OVR_SAMPLING_4, BME680_FILTER_7);
+	Bme680_Set_Conf(&Bme680, BME680_OSRS_T_OVR_SAMPLING_2, BME680_OSRS_H_OVR_SAMPLING_4, BME680_OSRS_P_OVR_SAMPLING_8, BME680_FILTER_7);
 	Bme680_Run_Gas(&Bme680);
 	Bme680_Set_Gas_Conf(&Bme680, Bme680.Gas_heat_dur);
 	xSemaphoreGive(xMutexI2C);
@@ -273,6 +280,10 @@ void vBme680Task(void *pvParameters) {
 //		printf("Temperature: %d °C\n\r", (Bme680.Temperature_Calc / 100U));
 //		printf("Pressure: %d hPa\n\r", (Bme680.Pressure_Calc / 100U));
 //		printf("Humidity: %d %%rH\n\r", (Bme680.Humidity_Calc / 1000U));
+//		printf("Gas: %d ohms\n\r", Bme680.Gas_Calc);
+		printf("Temperature: %d °C\n\r", (Bme680.Temperature_Raw));
+		printf("Pressure: %d hPa\n\r", (Bme680.Pressure_Raw));
+		printf("Humidity: %d %%rH\n\r", (Bme680.Humidity_Raw));
 //		printf("Gas: %d ohms\n\r", Bme680.Gas_Calc);
 		Bme680_Set_Mode(&Bme680, BME680_MODE_SLEEP);
 		xSemaphoreGive(xMutexI2C);
@@ -295,7 +306,7 @@ void vHeartBeatTask(void *pvParameters) {
 void vLCDTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
-	const TickType_t xDelay = 500 / portTICK_PERIOD_MS;
+	const TickType_t xDelay = 250 / portTICK_PERIOD_MS;
 
 	uint16_t *AdcValue;
 	AdcValue = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t));
@@ -303,24 +314,28 @@ void vLCDTask(void *pvParameters) {
 	I2CValue = pvPortMalloc(VEML7700_SAMPLES * sizeof(uint16_t));
 
 	ILI9341_Init(&hspi1);
-	for(uint16_t i = 0; i < ILI9341_TFTWIDTH; i++)
-	{
-		for(uint16_t j = 0; j < ILI9341_TFTHEIGHT; j++)
-		{
-			ILI9341_DrawPixel(i, j, ILI9341_BLUE);
-		}
-	}
+	EF_SetFont(&timesNewRoman_12ptFontInfo);
+//	ILI9341_ClearDisplay(ILI9341_BLACK, 0, 0, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
+	ILI9341_DrawImage(0, 0, background, 320, 240);
+//	GFX_Image(0, 0, background, 240, 240);
+
+	EF_PutString((const uint8_t*)"Weather Station", 100, 0, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
+//	EF_PutString((const uint8_t*)"Rainsensor:", 0, 90, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
+//	EF_PutString((const uint8_t*)"Moisture:", 0, 105, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
+//	EF_PutString((const uint8_t*)"Battery:", 0, 120, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
+//	EF_PutString((const uint8_t*)"ALS:", 0, 135, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
+//	EF_PutString((const uint8_t*)"White:", 0, 150, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
+//	EF_PutString((const uint8_t*)"Idle Time:", 0, 165, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
+
 	for (;;) {
 		vQueueReceive(xAnalogQueue, AdcValue, 3);
 		vQueueReceive(xI2CQueue, I2CValue, 2);
 
-//		printf("------------------------------\n\r");
-//		printf("RainSensor: %d%%\n\r", AdcValue[0]);
-//		printf("Moisture: %d%%\n\r", AdcValue[1]);
-//		printf("Battery: %d%%\n\r", AdcValue[2]);
-//		printf("ALS : %d lx\n\r", I2CValue[0]);
-//		printf("White : %d\n\r", I2CValue[1]);
-//		printf("------------------------------\n\r");
+//		ConvertValuesToTFT(100, 90, "%d [%%]", AdcValue[0]);
+//		ConvertValuesToTFT(100, 105, "%d [%%]", AdcValue[1]);
+//		ConvertValuesToTFT(100, 120, "%d [%%]", AdcValue[2]);
+//		ConvertValuesToTFT(100, 135, "%d [lx]", I2CValue[0]);
+//		ConvertValuesToTFT(100, 150, "%d", I2CValue[1]);
 
 		vTaskDelay(xDelay);
 	}
@@ -400,7 +415,7 @@ void vTimerIdleCallback(TimerHandle_t xTimer) {
 
 	IdleTicks = 0;
 
-	printf("Idle Time: %d%%\n\r", IdleTime);
+//	ConvertValuesToTFT(100, 165,"%d [%%]", IdleTime);
 }
 
 /* USER CODE END Application */

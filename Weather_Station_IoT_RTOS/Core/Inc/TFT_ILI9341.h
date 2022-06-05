@@ -11,7 +11,9 @@
 #define ILI9341_USE_HW_RESET 1
 #define ILI9341_USE_CS 1
 #define ILI9341_FREERTOS 1
+#define ILI9341_OPTIMIZE_HAL_SPI 1
 
+#define ILI9341_ROTATION 1 // 0 - 0*, 1 - 90*, 2 - 180*, 3 - 270*
 /* Pin operations */
 #define ILI9341_DC_LOW HAL_GPIO_WritePin(TFT_DC_GPIO_Port, TFT_DC_Pin, GPIO_PIN_RESET)
 #define ILI9341_DC_HIGH HAL_GPIO_WritePin(TFT_DC_GPIO_Port, TFT_DC_Pin, GPIO_PIN_SET)
@@ -25,8 +27,13 @@
 #define ILI9341_SPI_TIMEOUT 1000
 
 /* Registers */
+#if (ILI9341_ROTATION == 0 || ILI9341_ROTATION == 2)
 #define ILI9341_TFTWIDTH 240  ///< ILI9341 max TFT width
 #define ILI9341_TFTHEIGHT 320 ///< ILI9341 max TFT height
+#elif (ILI9341_ROTATION == 1 || ILI9341_ROTATION == 3)
+#define ILI9341_TFTWIDTH 320  ///< ILI9341 max TFT width
+#define ILI9341_TFTHEIGHT 240 ///< ILI9341 max TFT height
+#endif
 
 #define ILI9341_NOP 0x00     ///< No-op register
 #define ILI9341_SWRESET 0x01 ///< Software reset register
@@ -108,5 +115,8 @@
 #define ILI9341_PINK 0xFC18        ///< 255, 130, 198
 
 void ILI9341_Init(SPI_HandleTypeDef *hspi);
+void ILI9341_SetRotation(uint8_t Rotation);
 void ILI9341_DrawPixel(int16_t x, int16_t y, uint16_t color);
+void ILI9341_ClearDisplay(uint16_t color, int16_t x, int16_t y, uint16_t w, uint16_t h);
+void ILI9341_DrawImage(int16_t x, int16_t y, const uint8_t *img ,uint16_t w, uint16_t h);
 #endif /* INC_TFT_ILI9341_H_ */

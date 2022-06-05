@@ -4,7 +4,7 @@
 #include "i2c.h"
 #include "Bme680.h"
 
-static uint16_t read_register8(BME680_TypeDef *BME680, uint8_t Register) {
+static uint8_t read_register8(BME680_TypeDef *BME680, uint8_t Register) {
 	uint8_t Value = 0;
 
 	int err = HAL_I2C_Mem_Read(BME680->bme680_i2c, BME680->write_addr, Register,
@@ -273,7 +273,7 @@ uint8_t Bme680_Init(BME680_TypeDef *BME680, BME680_Calib_TypeDef *calib, I2C_Han
 	BME680->write_addr = (Address << 1);
 	BME680->Gas_heat_dur = 100;
 	BME680->Gas_heat_temp = 320;
-	calib->amb_temp = 24;
+	calib->amb_temp = 25;
 
 	rslt = Bme680_Reset(BME680);
 	vTaskDelay(5 / portTICK_PERIOD_MS); // For sure it should be there?
@@ -348,7 +348,7 @@ uint32_t Bme680_Read_Temperature(BME680_TypeDef *BME680) {
 	Value[0] = (read_register8(BME680, BME680_TEMP_XLSB_REGISTER) & BME680_TEMP_XLSB_MASK);
 	Value[1] = read_register8(BME680, BME680_TEMP_LSB_REGISTER);
 	Value[2] = read_register8(BME680, BME680_TEMP_MSB_REGISTER);
-	BME680->Temperature_Raw = (((Value[2] << 16) | (Value[1] << 8) | Value[0]) & BME680_20BIT_MASK);
+	BME680->Temperature_Raw = (((Value[2] << 16) | (Value[1] << 8) | Value[0]));
 	return BME680->Temperature_Raw;
 }
 
