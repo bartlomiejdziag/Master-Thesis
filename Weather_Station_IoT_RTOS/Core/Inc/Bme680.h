@@ -1,6 +1,8 @@
 #ifndef INC_BME680_H_
 #define INC_BME680_H_
 
+#define USE_FLOAT 1
+
 #define BME680_ADDR 0x76
 #define BME680_CHIPID 0x61
 #define BME680_COEFF_SIZE 41
@@ -202,6 +204,7 @@
 #define BME680_ADDR_RANGE_SW_ERR_ADDR	(0x04)
 #define BME680_ADDR_SENS_CONF_START	(0x5A)
 #define BME680_ADDR_GAS_CONF_START	(0x64)
+#define BME680_8BIT_MSK (0xFF)
 
 /** Array Index to Field data mapping for Calibration Data*/
 #define BME680_T2_LSB_REG	(1)
@@ -244,16 +247,22 @@ typedef struct {
 	uint8_t write_addr;
 	uint8_t chipID;
 
-	uint32_t Gas_Raw;
+	uint16_t Gas_Raw;
 	uint32_t Temperature_Raw;
 	uint32_t Pressure_Raw;
 	uint16_t Humidity_Raw;
 
+#if (USE_FLOAT == 0)
 	uint16_t Temperature_Calc;
 	uint32_t Pressure_Calc;
 	uint32_t Gas_Calc;
 	uint32_t Humidity_Calc;
-
+#else
+	float Temperature_Calc;
+	float Pressure_Calc;
+	float Humidity_Calc;
+	float Gas_Calc;
+#endif
 	uint16_t Gas_heat_temp;
 	uint16_t Gas_heat_dur;
 	uint8_t Gas_Range;
@@ -287,8 +296,13 @@ typedef struct bme680_calib_data {
 	int16_t par_p8;
 	int16_t par_p9;
 	uint8_t par_p10;
+#if (USE_FLOAT == 0)
 	/*! Variable to store t_fine size */
 	int32_t t_fine;
+#else
+	/*! Variable to store t_fine size */
+	float t_fine;
+#endif
 	/*! Variable to store heater resistance range */
 	uint8_t res_heat_range;
 	/*! Variable to store heater resistance value */
@@ -309,12 +323,13 @@ uint32_t Bme680_Reset(BME680_TypeDef *BME680);
 uint32_t Bme680_Set_Mode(BME680_TypeDef *BME680, uint8_t Mode);
 uint32_t Bme680_Set_Conf(BME680_TypeDef *BME680, uint8_t os_t, uint8_t os_h, uint8_t os_p, uint8_t filter);
 uint32_t Bme680_Run_Gas(BME680_TypeDef *BME680);
-uint32_t Bme680_Set_Gas_Conf(BME680_TypeDef *BME680, uint16_t heat_dur);
+uint32_t Bme680_Set_Gas_Conf(BME680_TypeDef *BME680, BME680_Calib_TypeDef *dev, uint16_t heat_dur);
 uint16_t Bme680_Read_Humidity(BME680_TypeDef *BME680);
 uint32_t Bme680_Read_Temperature(BME680_TypeDef *BME680);
 uint32_t Bme680_Read_Pressure(BME680_TypeDef *BME680);
 uint16_t Bme680_Read_Gas_Data(BME680_TypeDef *BME680);
 uint32_t Bme680_Read_Gas_Range(BME680_TypeDef *BME680);
-void calc_raw_values(BME680_TypeDef *BM680, BME680_Calib_TypeDef *dev);
+float Bme680_Calc_IAQ(BME680_TypeDef *BME680, BME680_Calib_TypeDef *dev);
+void BME680_calc_raw_values(BME680_TypeDef *BM680, BME680_Calib_TypeDef *dev);
 
 #endif /* INC_BME680_H_ */

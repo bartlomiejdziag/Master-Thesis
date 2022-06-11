@@ -3,6 +3,7 @@
 #include "task.h"
 #include "i2c.h"
 #include "Bme680.h"
+#include "math.h"
 
 static uint8_t read_register8(BME680_TypeDef *BME680, uint8_t Register) {
 	uint8_t Value = 0;
@@ -119,6 +120,7 @@ static int8_t get_calib_data(BME680_TypeDef *BME680, BME680_Calib_TypeDef *dev) 
 	return BME680_OK;
 }
 
+#if (USE_FLOAT == 0)
 static int16_t calc_temperature(uint32_t temp_adc, BME680_Calib_TypeDef *dev) {
 	int64_t var1;
 	int64_t var2;
@@ -251,18 +253,173 @@ static uint8_t calc_heater_res(uint16_t temp, BME680_Calib_TypeDef *dev) {
 
 	return heatr_res;
 }
+#else
 
-void calc_raw_values(BME680_TypeDef *BME680, BME680_Calib_TypeDef *dev) {
+/*!
+ * @brief This internal API is used to calculate the
+ * temperature value in float format
+ */
+static float calc_temperature(uint32_t temp_adc, BME680_Calib_TypeDef *dev)
+{
+	float var1 = 0;
+	float var2 = 0;
+	float calc_temp = 0;
+
+	/* calculate var1 data */
+	var1  = ((((float)temp_adc / 16384.0f) - ((float)dev->par_t1 / 1024.0f))
+			* ((float)dev->par_t2));
+
+	/* calculate var2 data */
+	var2  = (((((float)temp_adc / 131072.0f) - ((float)dev->par_t1 / 8192.0f)) *
+		(((float)temp_adc / 131072.0f) - ((float)dev->par_t1 / 8192.0f))) *
+		((float)dev->par_t3 * 16.0f));
+
+	/* t_fine value*/
+	dev->t_fine = (var1 + var2);
+
+	/* compensated temperature data*/
+	calc_temp  = ((dev->t_fine) / 5120.0f);
+
+	return calc_temp;
+}
+
+/*!
+ * @brief This internal API is used to calculate the
+ * pressure value in float format
+ */
+static float calc_pressure(uint32_t pres_adc, const BME680_Calib_TypeDef *dev)
+{
+	float var1 = 0;
+	float var2 = 0;
+	float var3 = 0;
+	float calc_pres = 0;
+
+	var1 = (((float)dev->t_fine / 2.0f) - 64000.0f);
+	var2 = var1 * var1 * (((float)dev->par_p6) / (131072.0f));
+	var2 = var2 + (var1 * ((float)dev->par_p5) * 2.0f);
+	var2 = (var2 / 4.0f) + (((float)dev->par_p4) * 65536.0f);
+	var1 = (((((float)dev->par_p3 * var1 * var1) / 16384.0f)
+		+ ((float)dev->par_p2 * var1)) / 524288.0f);
+	var1 = ((1.0f + (var1 / 32768.0f)) * ((float)dev->par_p1));
+	calc_pres = (1048576.0f - ((float)pres_adc));
+
+	/* Avoid exception caused by division by zero */
+	if ((int)var1 != 0) {
+		calc_pres = (((calc_pres - (var2 / 4096.0f)) * 6250.0f) / var1);
+		var1 = (((float)dev->par_p9) * calc_pres * calc_pres) / 2147483648.0f;
+		var2 = calc_pres * (((float)dev->par_p8) / 32768.0f);
+		var3 = ((calc_pres / 256.0f) * (calc_pres / 256.0f) * (calc_pres / 256.0f)
+			* (dev->par_p10 / 131072.0f));
+		calc_pres = (calc_pres + (var1 + var2 + var3 + ((float)dev->par_p7 * 128.0f)) / 16.0f);
+	} else {
+		calc_pres = 0;
+	}
+
+	return calc_pres;
+}
+
+/*!
+ * @brief This internal API is used to calculate the
+ * humidity value in float format
+ */
+static float calc_humidity(uint16_t hum_adc, const BME680_Calib_TypeDef *dev)
+{
+	float calc_hum = 0;
+	float var1 = 0;
+	float var2 = 0;
+	float var3 = 0;
+	float var4 = 0;
+	float temp_comp;
+
+	/* compensated temperature data*/
+	temp_comp  = ((dev->t_fine) / 5120.0f);
+
+	var1 = (float)((float)hum_adc) - (((float)dev->par_h1 * 16.0f) + (((float)dev->par_h3 / 2.0f)
+		* temp_comp));
+
+	var2 = var1 * ((float)(((float) dev->par_h2 / 262144.0f) * (1.0f + (((float)dev->par_h4 / 16384.0f)
+		* temp_comp) + (((float)dev->par_h5 / 1048576.0f) * temp_comp * temp_comp))));
+
+	var3 = (float) dev->par_h6 / 16384.0f;
+
+	var4 = (float) dev->par_h7 / 2097152.0f;
+
+	calc_hum = var2 + ((var3 + (var4 * temp_comp)) * var2 * var2);
+
+	if (calc_hum > 100.0f)
+		calc_hum = 100.0f;
+	else if (calc_hum < 0.0f)
+		calc_hum = 0.0f;
+
+	return calc_hum;
+}
+
+/*!
+ * @brief This internal API is used to calculate the
+ * gas resistance value in float format
+ */
+static float calc_gas_resistance(uint16_t gas_res_adc, uint8_t gas_range, const BME680_Calib_TypeDef *dev)
+{
+	float calc_gas_res;
+	float var1 = 0;
+	float var2 = 0;
+	float var3 = 0;
+
+	const float lookup_k1_range[16] = {
+	0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, -0.8,
+	0.0, 0.0, -0.2, -0.5, 0.0, -1.0, 0.0, 0.0};
+	const float lookup_k2_range[16] = {
+	0.0, 0.0, 0.0, 0.0, 0.1, 0.7, 0.0, -0.8,
+	-0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+
+	var1 = (1340.0f + (5.0f * dev->range_sw_err));
+	var2 = (var1) * (1.0f + lookup_k1_range[gas_range]/100.0f);
+	var3 = 1.0f + (lookup_k2_range[gas_range]/100.0f);
+
+	calc_gas_res = 1.0f / (float)(var3 * (0.000000125f) * (float)(1 << gas_range) * (((((float)gas_res_adc)
+		- 512.0f)/var2) + 1.0f));
+
+	return calc_gas_res;
+}
+
+/*!
+ * @brief This internal API is used to calculate the
+ * heater resistance value in float format
+ */
+static float BME680_calc_heater_res(uint16_t temp, const BME680_Calib_TypeDef *dev)
+{
+	float var1 = 0;
+	float var2 = 0;
+	float var3 = 0;
+	float var4 = 0;
+	float var5 = 0;
+	float res_heat = 0;
+
+	if (temp > 400) /* Cap temperature */
+		temp = 400;
+
+	var1 = (((float)dev->par_gh1 / (16.0f)) + 49.0f);
+	var2 = ((((float)dev->par_gh2 / (32768.0f)) * (0.0005f)) + 0.00235f);
+	var3 = ((float)dev->par_gh3 / (1024.0f));
+	var4 = (var1 * (1.0f + (var2 * (float)temp)));
+	var5 = (var4 + (var3 * (float)dev->amb_temp));
+	res_heat = (uint8_t)(3.4f * ((var5 * (4 / (4 + (float)dev->res_heat_range)) *
+		(1/(1 + ((float) dev->res_heat_val * 0.002f)))) - 25));
+
+	return res_heat;
+}
+
+#endif /* USE_FLOAT */
+
+void BME680_calc_raw_values(BME680_TypeDef *BME680, BME680_Calib_TypeDef *dev) {
 
 	BME680->Temperature_Raw = Bme680_Read_Temperature(BME680);
 	BME680->Pressure_Raw = Bme680_Read_Pressure(BME680);
 	BME680->Humidity_Raw = Bme680_Read_Humidity(BME680);
-	BME680->Gas_Raw = Bme680_Read_Gas_Data(BME680);
 
 	BME680->Temperature_Calc = calc_temperature(BME680->Temperature_Raw, dev);
 	BME680->Pressure_Calc = calc_pressure(BME680->Pressure_Raw, dev);
 	BME680->Humidity_Calc = calc_humidity(BME680->Humidity_Raw, dev);
-	BME680->Gas_Calc = calc_gas_resistance(BME680->Gas_Raw, BME680->Gas_Range, dev);
 }
 
 uint8_t Bme680_Init(BME680_TypeDef *BME680, BME680_Calib_TypeDef *calib, I2C_HandleTypeDef *i2c, uint8_t Address) {
@@ -271,7 +428,7 @@ uint8_t Bme680_Init(BME680_TypeDef *BME680, BME680_Calib_TypeDef *calib, I2C_Han
 
 	BME680->bme680_i2c = i2c;
 	BME680->write_addr = (Address << 1);
-	BME680->Gas_heat_dur = 100;
+	BME680->Gas_heat_dur = 30;
 	BME680->Gas_heat_temp = 320;
 	calib->amb_temp = 25;
 
@@ -325,13 +482,14 @@ uint32_t Bme680_Run_Gas(BME680_TypeDef *BME680) {
 	return rslt = Bme680_Set_Register(BME680, BME680_RUN_GAS_MSK, BME680_CTRL_GAS_1_REGISTER, BME680_RUN_GAS);
 }
 
-uint32_t Bme680_Set_Gas_Conf(BME680_TypeDef *BME680, uint16_t heat_dur ) {
+uint32_t Bme680_Set_Gas_Conf(BME680_TypeDef *BME680, BME680_Calib_TypeDef *dev, uint16_t heat_dur ) {
 	uint8_t rslt;
-	uint8_t calc_dur;
+	uint8_t calc_dur, calc_res;
 	calc_dur = BME680_Calc_Heater_Dur(heat_dur);
 	rslt = Bme680_Set_Register(BME680, BME680_NBCONV_MSK, BME680_CTRL_GAS_1_REGISTER, BME680_HEATER_PROF_SET_POINT_0);
-	rslt = Bme680_Set_Register(BME680, 0xFF, BME680_GAS_WAIT_0_REGISTER, calc_dur);
-//	rslt = Bme680_Set_Register(BME680, 0x00, BME680_RES_HEAT_0_REGISTER, BME680_GAS_WAIT_100MS);
+	rslt = Bme680_Set_Register(BME680, BME680_8BIT_MSK, BME680_GAS_WAIT_0_REGISTER, calc_dur);
+	calc_res = BME680_calc_heater_res(BME680->Gas_heat_temp, dev);
+	rslt = Bme680_Set_Register(BME680, BME680_8BIT_MSK, BME680_ADDR_SENS_CONF_START, calc_res);
 	return rslt;
 }
 
@@ -348,7 +506,7 @@ uint32_t Bme680_Read_Temperature(BME680_TypeDef *BME680) {
 	Value[0] = (read_register8(BME680, BME680_TEMP_XLSB_REGISTER) & BME680_TEMP_XLSB_MASK);
 	Value[1] = read_register8(BME680, BME680_TEMP_LSB_REGISTER);
 	Value[2] = read_register8(BME680, BME680_TEMP_MSB_REGISTER);
-	BME680->Temperature_Raw = (((Value[2] << 16) | (Value[1] << 8) | Value[0]));
+	BME680->Temperature_Raw = (((Value[2] << 12) | (Value[1] << 4) | Value[0] >> 4));
 	return BME680->Temperature_Raw;
 }
 
@@ -357,7 +515,7 @@ uint32_t Bme680_Read_Pressure(BME680_TypeDef *BME680) {
 	Value[0] = (read_register8(BME680, BME680_PRESS_XLSB_REGISTER) & BME680_PRESS_XLSB_MASK);
 	Value[1] = read_register8(BME680, BME680_PRESS_LSB_REGISTER);
 	Value[2] = read_register8(BME680, BME680_PRESS_MSB_REGISTER);
-	BME680->Pressure_Raw = (((Value[2] << 16) | (Value[1] << 8) | Value[0]) & BME680_20BIT_MASK);
+	BME680->Pressure_Raw = (((Value[2] << 12) | (Value[1] << 4) | Value[0] >> 4) & BME680_20BIT_MASK);
 	return BME680->Pressure_Raw;
 }
 
@@ -365,10 +523,46 @@ uint16_t Bme680_Read_Gas_Data(BME680_TypeDef *BME680) {
 	uint8_t Value[2] = { 0 };
 	Value[0] = (read_register8(BME680, BME680_GAS_R_LSB_REGISTER) & BME680_GAS_LSB_MASK);
 	Value[1] = read_register8(BME680, BME680_GAS_R_MSB_REGISTER);
-	BME680->Gas_Raw = (((Value[1] << 2) | Value[0]) & BME680_GAS_RAW_MASK);
+	BME680->Gas_Raw = (((Value[1] << 2) | Value[0] >> 6) & BME680_GAS_RAW_MASK);
 	return BME680->Gas_Raw;
 }
 
 uint32_t Bme680_Read_Gas_Range(BME680_TypeDef *BME680) {
-	return BME680->Gas_Range = (read_register8(BME680, BME680_GAS_R_LSB_REGISTER) & BME680_GAS_RANGE_MSK);
+	uint8_t gas_range;
+	return gas_range = (read_register8(BME680, BME680_GAS_R_LSB_REGISTER) & BME680_GAS_RANGE_MSK);
+}
+
+float Bme680_Calc_IAQ(BME680_TypeDef *BME680, BME680_Calib_TypeDef *dev) {
+	float hum_baseline = 40.0f;
+	float hum_weighting = 0.25f;
+	float gas_offset = 0.0f;
+	float hum_offset = 0.0f;
+	float hum_score = 0.0f;
+	float gas_score = 0.0f;
+	const float oGasResistanceBaseLine = 149598.0f;
+
+	BME680->Gas_Raw = Bme680_Read_Gas_Data(BME680);
+	BME680->Gas_Range = Bme680_Read_Gas_Range(BME680);
+	BME680->Gas_Calc = calc_gas_resistance(BME680->Gas_Raw, BME680->Gas_Range, dev);
+
+	gas_offset = oGasResistanceBaseLine - BME680->Gas_Calc;
+	hum_offset = BME680->Humidity_Calc - hum_baseline;
+	// calculate hum_score as distance from hum_baseline
+	if (hum_offset > 0.0f) {
+		hum_score = 100.0f - hum_baseline - hum_offset;
+		hum_score /= (100.0f - hum_baseline);
+		hum_score *= (hum_weighting * 100.0f);
+	} else {
+		hum_score = hum_baseline + hum_offset;
+		hum_score /= hum_baseline;
+		hum_score *= (100.0f - (hum_weighting * 100.0f));
+	}
+	//calculate gas score as distance from baseline
+	if (gas_offset > 0.0f) {
+		gas_score = BME680->Gas_Calc / oGasResistanceBaseLine;
+		gas_score *= (100.0f - (hum_weighting * 100.0f));
+	} else {
+		gas_score = 100.0f - (hum_weighting * 100.0f);
+	}
+	return (hum_score + gas_score);
 }
