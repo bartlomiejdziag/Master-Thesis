@@ -360,26 +360,20 @@ static float calc_humidity(uint16_t hum_adc, const BME680_Calib_TypeDef *dev)
  */
 static float calc_gas_resistance(uint16_t gas_res_adc, uint8_t gas_range, const BME680_Calib_TypeDef *dev)
 {
-	float calc_gas_res;
+	float gas_res = 0;
 	float var1 = 0;
-	float var2 = 0;
-	float var3 = 0;
 
 	const float lookup_k1_range[16] = {
-	0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, -0.8,
-	0.0, 0.0, -0.2, -0.5, 0.0, -1.0, 0.0, 0.0};
+	1.0, 1.0, 1.0, 1.0, 1.0, 0.99, 1.0, 0.992,
+	1.0, 1.0, 0.998, 0.995, 1.0, 0.99, 1.0, 1.0};
 	const float lookup_k2_range[16] = {
-	0.0, 0.0, 0.0, 0.0, 0.1, 0.7, 0.0, -0.8,
-	-0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+	8000000.0, 4000000.0, 2000000.0, 1000000.0, 499500.4995, 248262.1648, 125000, 63004.03226,
+	31281.28128, 15625, 7812.5, 3906.25, 1953.125, 976.5625, 488.28125, 244.140625};
 
-	var1 = (1340.0f + (5.0f * dev->range_sw_err));
-	var2 = (var1) * (1.0f + lookup_k1_range[gas_range]/100.0f);
-	var3 = 1.0f + (lookup_k2_range[gas_range]/100.0f);
+	var1 = (1340.0f + 5.0f * dev->range_sw_err) * lookup_k1_range[gas_range];
+	gas_res = var1 * lookup_k2_range[gas_range] / (((float)gas_res_adc) - 512.0f + var1);
 
-	calc_gas_res = 1.0f / (float)(var3 * (0.000000125f) * (float)(1 << gas_range) * (((((float)gas_res_adc)
-		- 512.0f)/var2) + 1.0f));
-
-	return calc_gas_res;
+	return gas_res;
 }
 
 /*!
@@ -533,7 +527,7 @@ uint32_t Bme680_Read_Gas_Range(BME680_TypeDef *BME680) {
 }
 
 float Bme680_Calc_IAQ(BME680_TypeDef *BME680, BME680_Calib_TypeDef *dev) {
-	float hum_baseline = 40.0f;
+	float hum_baseline = 38.0f;
 	float hum_weighting = 0.25f;
 	float gas_offset = 0.0f;
 	float hum_offset = 0.0f;
