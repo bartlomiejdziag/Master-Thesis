@@ -3,7 +3,6 @@
 #include "task.h"
 #include "i2c.h"
 #include "Bme680.h"
-#include "math.h"
 
 static uint8_t read_register8(BME680_TypeDef *BME680, uint8_t Register) {
 	uint8_t Value = 0;

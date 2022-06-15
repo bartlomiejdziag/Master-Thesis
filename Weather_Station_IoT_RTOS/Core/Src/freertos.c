@@ -41,7 +41,8 @@
 #include "GFX_Color.h"
 #include "GFX_EnhancedFonts.h"
 #include "EnhancedFonts/times_new_roma_12pts_bold.h"
-#include <background.h>
+#include "background.h"
+#include "XPT2046.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -116,7 +117,6 @@ static void ConvertValuesToTFT(uint16_t PosX, uint16_t PosY, char const *format,
 	va_start(args, format);
 	vsnprintf(buf, sizeof(buf), format, args);
 	va_end(args);
-//	ILI9341_ClearDisplay(ILI9341_BLACK, PosX, PosY, 38, 12);
 	EF_PutString((const uint8_t*)buf, PosX, PosY, ILI9341_WHITE, BG_COLOR, ILI9341_BLACK);
 }
 
@@ -248,7 +248,7 @@ void vAnalogTask(void *pvParameters) {
 	Resault = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t));
 	HAL_ADC_Start_DMA(&hadc1, (uint32_t*) AdcRawValue, 3);
 
-	const TickType_t xDelay = 500 / portTICK_PERIOD_MS;
+	const TickType_t xDelay = 100 / portTICK_PERIOD_MS;
 
 	for (;;) {
 		vQueueSend(xAnalogQueue, xCalcAdc(AdcRawValue, Resault), ADC_SAMPLES);
@@ -277,10 +277,10 @@ void vBme680Task(void *pvParameters) {
 		xSemaphoreTake(xMutexI2C, portMAX_DELAY);
 		Bme680_Set_Mode(&Bme680, BME680_MODE_FORCE);
 		BME680_calc_raw_values(&Bme680, &Bme680_calib);
-		printf("T: %.2f degC, P: %.2f hPa, H %.2f %%rH\n\r", Bme680.Temperature_Calc, Bme680.Pressure_Calc / 100.0f, Bme680.Humidity_Calc);
-		printf("IAQ: %.2f\n\r", Bme680_Calc_IAQ(&Bme680, &Bme680_calib));
-		printf("Gas: %.2f ohms\n\r", Bme680.Gas_Calc);
-		printf("Raw_Gas: %d\n\r", Bme680.Gas_Raw);
+//		printf("T: %.2f degC, P: %.2f hPa, H %.2f %%rH\n\r", Bme680.Temperature_Calc, Bme680.Pressure_Calc / 100.0f, Bme680.Humidity_Calc);
+//		printf("IAQ: %.2f\n\r", Bme680_Calc_IAQ(&Bme680, &Bme680_calib));
+//		printf("Gas: %.2f ohms\n\r", Bme680.Gas_Calc);
+//		printf("Raw_Gas: %d\n\r", Bme680.Gas_Raw);
 		Bme680_Set_Mode(&Bme680, BME680_MODE_SLEEP);
 		xSemaphoreGive(xMutexI2C);
 		vTaskDelay(xDelay);
@@ -302,31 +302,33 @@ void vHeartBeatTask(void *pvParameters) {
 void vLCDTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
+	uint16_t Xread, Yread;
 	uint16_t *AdcValue;
 	AdcValue = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t));
 	uint16_t *I2CValue;
 	I2CValue = pvPortMalloc(VEML7700_SAMPLES * sizeof(uint16_t));
 
 	ILI9341_Init(&hspi1);
+	XPT2046_Init(&hspi2, EXTI0_IRQn);
 	EF_SetFont(&timesNewRoman_12ptFontInfo);
-	ILI9341_DrawImage(0, 0, background, 320, 240);
-
-//	EF_PutString((const uint8_t*)"Weather Station", 100, 0, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
-//	EF_PutString((const uint8_t*)"Rainsensor:", 100, 90, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
-//	EF_PutString((const uint8_t*)"Moisture:", 100, 105, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
-//	EF_PutString((const uint8_t*)"Battery:", 100, 120, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
-//	EF_PutString((const uint8_t*)"ALS:", 100, 135, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
-//	EF_PutString((const uint8_t*)"White:", 100, 150, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
-//	EF_PutString((const uint8_t*)"Idle Time:", 100, 165, ILI9341_WHITE, BG_TRANSPARENT, ILI9341_BLACK);
+	ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
 	GFX_DrawFillRectangle(282, 12, 24, 11, ILI9341_GREEN);
 
 	for (;;) {
 		vQueueReceive(xAnalogQueue, AdcValue, 3);
 		vQueueReceive(xI2CQueue, I2CValue, 2);
 
+		XPT2046_Task();
+		if(XPT2046_IsTouched())
+		{
+			XPT2046_GetTouchPoint(&Xread, &Yread);
+			printf("X and Y: %d--%d\n\r", Xread, Yread);
+		}
+//		XPT2046_GetRawData();
+//		XPT2046_ReadTouchPoint(&Xread, &Yread);
 //		ConvertValuesToTFT(200, 90, "%d", AdcValue[0]);
 //		ConvertValuesToTFT(200, 105, "%d", AdcValue[1]);
-//		ConvertValuesToTFT(200, 120, "%d [%%]", AdcValue[2]);
+		ConvertValuesToTFT(200, 120, "%d [%%]", AdcValue[2]);
 //		ConvertValuesToTFT(200, 135, "%d", I2CValue[0]);
 //		ConvertValuesToTFT(200, 150, "%d", I2CValue[1]);
 
@@ -338,7 +340,7 @@ void vLCDTask(void *pvParameters) {
 void vVeml7700Task(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
-	const TickType_t xDelay = 200 / portTICK_PERIOD_MS;
+	const TickType_t xDelay = 100 / portTICK_PERIOD_MS;
 
 	uint16_t als, white;
 	uint16_t* calc_values;
