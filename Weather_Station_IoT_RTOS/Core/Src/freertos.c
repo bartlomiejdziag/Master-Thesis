@@ -69,6 +69,7 @@
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
 
+TaskHandle_t xLCDHandle = NULL;
 SemaphoreHandle_t xMutexPrintf, xMutexIdle, xMutexI2C;
 QueueHandle_t xAnalogQueue, xI2CQueue;
 TimerHandle_t xTimerIdle;
@@ -103,7 +104,7 @@ static inline uint16_t* xCalcAdc(uint16_t *adc, uint16_t *resault) {
 		if (i != 2) {
 			resault[i] = ((adc[i] * 100U) / 1024U);
 		} else {
-			resault[i] = ((adc[i] * 100U) / 256U);
+			resault[i] = (uint16_t)((adc[i]) / 2.45);
 		}
 	}
 	return resault;
@@ -124,6 +125,7 @@ void vAnalogTask(void *pvParameters);
 void vEthernetTask(void *pvParameters);
 void vBme680Task(void *pvParameters);
 void vLCDTask(void *pvParameters);
+void vLCDTouchTask(void *pvParameters);
 void vVeml7700Task(void *pvParameters);
 void vEthernetTask(void *pvParameters);
 void vHeartBeatTask(void *pvParameters);
@@ -200,7 +202,8 @@ void MX_FREERTOS_Init(void) {
 	xTaskCreate(vAnalogTask, "AnalogTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
 	xTaskCreate(vHeartBeatTask, "HeartBeatTask", 128, (void*) 1, LOW_PRIORITY, NULL);
 	xTaskCreate(vBme680Task, "Bme680Task", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vLCDTask, "LCDTask", 512, (void*) 1, HIGH_PRIORITY, NULL);
+	xTaskCreate(vLCDTask, "LCDTask", 512, (void*) 1, HIGH_PRIORITY, &xLCDHandle);
+	xTaskCreate(vLCDTouchTask, "LCDTouchTask", 256, (void*) 1, HIGH_PRIORITY, NULL);
 	xTaskCreate(vVeml7700Task, "Veml7700Task", 256, (void*) 1, NORMAL_PRIORITY, NULL);
 	xTaskCreate(vEthernetTask, "EthernetTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
   /* USER CODE END RTOS_THREADS */
@@ -302,30 +305,38 @@ void vHeartBeatTask(void *pvParameters) {
 void vLCDTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
-	uint16_t Xread, Yread;
+	uint8_t percentage;
+	uint32_t flag;
+
 	uint16_t *AdcValue;
 	AdcValue = pvPortMalloc(ADC_SAMPLES * sizeof(uint16_t));
 	uint16_t *I2CValue;
 	I2CValue = pvPortMalloc(VEML7700_SAMPLES * sizeof(uint16_t));
 
 	ILI9341_Init(&hspi1);
-	XPT2046_Init(&hspi2, EXTI0_IRQn);
 	EF_SetFont(&timesNewRoman_12ptFontInfo);
 	ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
-	GFX_DrawFillRectangle(282, 12, 24, 11, ILI9341_GREEN);
 
 	for (;;) {
 		vQueueReceive(xAnalogQueue, AdcValue, 3);
 		vQueueReceive(xI2CQueue, I2CValue, 2);
 
-		XPT2046_Task();
-		if(XPT2046_IsTouched())
-		{
-			XPT2046_GetTouchPoint(&Xread, &Yread);
-			printf("X and Y: %d--%d\n\r", Xread, Yread);
+		if (AdcValue[2] > 75) {
+			percentage = ((AdcValue[2] % 25U));
+			GFX_DrawFillRectangle(282, 12, percentage, 11, ILI9341_GREEN);
+		} else {
+			EF_PutString((const uint8_t*) "Recharge battery!", 80, 10,
+			ILI9341_MAGENTA, BG_TRANSPARENT, 0);
 		}
-//		XPT2046_GetRawData();
-//		XPT2046_ReadTouchPoint(&Xread, &Yread);
+
+		xTaskNotifyWait(0, 0xFFFFFFFF, &flag, 100);
+
+		if (flag == 0x01) {
+			ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
+			EF_PutString((const uint8_t*) "Widget Values", 80, 50, ILI9341_MAGENTA, BG_TRANSPARENT, 0);
+		} else if (flag == 0x02) {
+			ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
+		}
 //		ConvertValuesToTFT(200, 90, "%d", AdcValue[0]);
 //		ConvertValuesToTFT(200, 105, "%d", AdcValue[1]);
 		ConvertValuesToTFT(200, 120, "%d [%%]", AdcValue[2]);
@@ -335,6 +346,38 @@ void vLCDTask(void *pvParameters) {
 //		vTaskDelay(xDelay);
 	}
 }
+
+/* LCD Touch */
+void vLCDTouchTask(void *pvParameters) {
+	configASSERT(((uint32_t ) pvParameters) == 1);
+
+	uint8_t counter = 0;
+	const TickType_t xDelay = 50 / portTICK_PERIOD_MS;
+
+	uint16_t Xread, Yread;
+	XPT2046_Init(&hspi2, EXTI0_IRQn);
+
+	for (;;) {
+		XPT2046_Task();
+		if (XPT2046_IsTouched()) {
+			XPT2046_GetTouchPoint(&Xread, &Yread);
+			if (Xread > 20 && Yread > 190) {
+				printf("X and Y: %d--%d\n\r", Xread, Yread);
+				counter++;
+			}
+
+			if (counter == 1) {
+				xTaskNotify(xLCDHandle, 0x01, eSetBits);
+			} else if (counter == 2) {
+				xTaskNotify(xLCDHandle, 0x02, eSetBits);
+			} else if (counter == 3) {
+				counter = 0;
+			}
+		}
+		vTaskDelay(xDelay);
+	}
+}
+
 
 /* Digital Ambient Light Sensor */
 void vVeml7700Task(void *pvParameters) {
