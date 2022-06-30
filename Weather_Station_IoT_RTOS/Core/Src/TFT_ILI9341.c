@@ -252,3 +252,15 @@ void ILI9341_ClearDisplay(uint16_t color, int16_t x, int16_t y, uint16_t w, uint
 		}
 #endif
 }
+
+void ILI9341_TFTSLEEP_ON(void)
+{
+	ILI9341_SendCommand(0x10); // Sleep
+	ILI9341_Delay(5); // Delay for shutdown time before another command can be sent
+}
+
+void ILI9341_TFTSLEEP_OFF(void)
+{
+	ILI9341_SendCommand(0x11); // Wake display
+	ILI9341_Delay(5); // Delay for pwer supplies to stabilise
+}

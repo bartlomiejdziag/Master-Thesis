@@ -119,4 +119,7 @@ void ILI9341_SetRotation(uint8_t Rotation);
 void ILI9341_DrawPixel(int16_t x, int16_t y, uint16_t color);
 void ILI9341_ClearDisplay(uint16_t color, int16_t x, int16_t y, uint16_t w, uint16_t h);
 void ILI9341_DrawImage(int16_t x, int16_t y, const uint8_t *img ,uint16_t w, uint16_t h);
+
+void ILI9341_TFTSLEEP_ON(void);
+void ILI9341_TFTSLEEP_OFF(void);
 #endif /* INC_TFT_ILI9341_H_ */

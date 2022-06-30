@@ -257,11 +257,13 @@ typedef struct {
 	uint32_t Pressure_Calc;
 	uint32_t Gas_Calc;
 	uint32_t Humidity_Calc;
+	uint32_t IAQ_Calc;
 #else
 	float Temperature_Calc;
 	float Pressure_Calc;
 	float Humidity_Calc;
 	float Gas_Calc;
+	float IAQ_Calc;
 #endif
 	uint16_t Gas_heat_temp;
 	uint16_t Gas_heat_dur;

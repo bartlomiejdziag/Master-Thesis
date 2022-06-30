@@ -4,7 +4,7 @@
 #include "GFX_Color.h"
 
 // Samples to average touch coord
-#define MAX_SAMPLES 15
+#define MAX_SAMPLES 10
 
 static SPI_HandleTypeDef *Xpt2046SpiHandler; // SPI handler
 static IRQn_Type Xpt2046Irqn; // Interrupt numer

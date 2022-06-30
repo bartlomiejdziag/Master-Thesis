@@ -1,6 +1,10 @@
 #include "main.h"
 #include "FreeRTOS.h"
+#include "timers.h"
+#include "semphr.h"
 #include "XPT2046.h"
+
+extern volatile uint32_t DelayTick;
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (GPIO_Pin == TOUCH_IRQ_Pin) {
@@ -20,3 +24,12 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 	}
 }
 
+void vTimerIdleCallback(TimerHandle_t xTimer) {
+	configASSERT(xTimer);
+
+}
+
+void vTimerDelayCallback(TimerHandle_t xTimer) {
+	configASSERT(xTimer);
+	DelayTick = 1;
+}
