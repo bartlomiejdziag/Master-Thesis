@@ -268,6 +268,8 @@ typedef struct {
 	uint16_t Gas_heat_temp;
 	uint16_t Gas_heat_dur;
 	uint8_t Gas_Range;
+
+	float Mean_Measurments[4];
 } BME680_TypeDef;
 
 typedef struct bme680_calib_data {
@@ -333,5 +335,6 @@ uint16_t Bme680_Read_Gas_Data(BME680_TypeDef *BME680);
 uint32_t Bme680_Read_Gas_Range(BME680_TypeDef *BME680);
 float Bme680_Calc_IAQ(BME680_TypeDef *BME680, BME680_Calib_TypeDef *dev);
 void BME680_calc_raw_values(BME680_TypeDef *BM680, BME680_Calib_TypeDef *dev);
+void Bme680_MeanMeasurements(BME680_TypeDef *BME680);
 
 #endif /* INC_BME680_H_ */

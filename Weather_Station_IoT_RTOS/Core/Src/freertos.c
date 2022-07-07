@@ -26,6 +26,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdarg.h>
+#include <lwip.h>
 #include "timers.h"
 #include "printf.h"
 #include "usart.h"
@@ -76,7 +77,8 @@ SemaphoreHandle_t xMutexPrintf, xMutexIdle, xMutexI2C;
 QueueHandle_t xAnalogQueue, xVeml7700Queue, xBME680Queue;
 TimerHandle_t xTimerIdle, xTimerDelay;
 
-uint32_t IdleTicks;
+extern LPTIM_HandleTypeDef hlptim1;
+
 volatile uint32_t DelayTick;
 
 typedef struct {
@@ -141,16 +143,21 @@ void StartDefaultTask(void *argument);
 extern void MX_LWIP_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
-/* USER CODE BEGIN VPORT_SUPPORT_TICKS_AND_SLEEP */
-__weak void vPortSuppressTicksAndSleep( TickType_t xExpectedIdleTime )
+/* USER CODE BEGIN PREPOSTSLEEP */
+__weak void PreSleepProcessing(uint32_t *ulExpectedIdleTime)
 {
-  // Generated when configUSE_TICKLESS_IDLE == 2.
-  // Function called in tasks.c (in portTASK_FUNCTION).
-  // TO BE COMPLETED or TO BE REPLACED by a user one, overriding that weak one.
-	HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-	ILI9341_TFTSLEEP_ON();
+/* place for user code */
+	HAL_SuspendTick();
+	HAL_LPTIM_TimeOut_Start_IT(&hlptim1, 0xFFFF, *ulExpectedIdleTime);
 }
-/* USER CODE END VPORT_SUPPORT_TICKS_AND_SLEEP */
+
+__weak void PostSleepProcessing(uint32_t *ulExpectedIdleTime)
+{
+/* place for user code */
+	HAL_LPTIM_TimeOut_Stop_IT(&hlptim1);
+	HAL_ResumeTick();
+}
+/* USER CODE END PREPOSTSLEEP */
 
 /**
   * @brief  FreeRTOS initialization
@@ -193,12 +200,12 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
 	xTaskCreate(vAnalogTask, "AnalogTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vHeartBeatTask, "HeartBeatTask", 128, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vBme680Task, "Bme680Task", 360, (void*) 1, NORMAL_PRIORITY, NULL);
+	xTaskCreate(vHeartBeatTask, "HeartBeatTask", 128, (void*) 1, LOW_PRIORITY, NULL);
+	xTaskCreate(vBme680Task, "Bme680Task", 512, (void*) 1, NORMAL_PRIORITY, NULL);
 	xTaskCreate(vLCDTask, "LCDTask", 512, (void*) 1, HIGH_PRIORITY, &xLCDHandle);
 	xTaskCreate(vLCDTouchTask, "LCDTouchTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
 	xTaskCreate(vVeml7700Task, "Veml7700Task", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vEthernetTask, "EthernetTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
+	xTaskCreate(vEthernetTask, "EthernetTask", 512, (void*) 1, HIGH_PRIORITY, NULL);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -239,15 +246,15 @@ void vAnalogTask(void *pvParameters) {
 
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
-	Analog_t adc = {0};
+	Analog_t adc = { 0 };
 
 	HAL_ADC_Start_DMA(&hadc1, (uint32_t*) adc.AdcRawValue, 3);
 
 	for (;;) {
 		xCalcAdc(adc.AdcRawValue, adc.Resault);
 		xQueueSend(xAnalogQueue, &adc, 0);
+		vTaskDelay(pdMS_TO_TICKS(500));
 	}
-	vTaskDelay(pdMS_TO_TICKS(500));
 }
 
 /* Weather sensor (temperature, humidity, atmospheric pressure */
@@ -267,16 +274,23 @@ void vBme680Task(void *pvParameters) {
 
 	for (;;) {
 		xSemaphoreTake(xMutexI2C, portMAX_DELAY);
-		Bme680_Set_Mode(&Bme680, BME680_MODE_FORCE);
-		BME680_calc_raw_values(&Bme680, &Bme680_calib);
-		Bme680.IAQ_Calc = Bme680_Calc_IAQ(&Bme680, &Bme680_calib);
-
-		Bme680_Set_Mode(&Bme680, BME680_MODE_SLEEP);
+		for(uint32_t i = 0; i < 5; i++) {
+			Bme680_Set_Mode(&Bme680, BME680_MODE_FORCE);
+			BME680_calc_raw_values(&Bme680, &Bme680_calib);
+			Bme680_MeanMeasurements(&Bme680);
+			Bme680_Set_Mode(&Bme680, BME680_MODE_SLEEP);
+			vTaskDelay(pdMS_TO_TICKS(10));
+		}
 		xSemaphoreGive(xMutexI2C);
+
+		Bme680.Mean_Measurments[0] /= 6.00f;
+		Bme680.Mean_Measurments[1] /= 5.99f;
+		Bme680.Mean_Measurments[2] /= 6.00f;
+		Bme680.Mean_Measurments[3] /= 6.00f;
 
 		xQueueSend(xBME680Queue, &Bme680, 0);
 
-		vTaskDelay(pdMS_TO_TICKS(350));
+		vTaskDelay(pdMS_TO_TICKS(250));
 	}
 }
 
@@ -308,14 +322,22 @@ void vLCDTask(void *pvParameters) {
 	ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
 
 	for (;;) {
+
+		xSemaphoreTake(xMutexI2C, portMAX_DELAY);
 		ILI9341_TFTSLEEP_OFF();
-		xStatus = xQueueReceive(xAnalogQueue, &adc, pdMS_TO_TICKS(50));
+		xSemaphoreGive(xMutexI2C);
+
+		xStatus = xQueueReceive(xAnalogQueue, &adc, pdMS_TO_TICKS(0));
 		if (xStatus == pdPASS) {
-			ConvertValuesToTFT(245, 65, "%d", adc.Resault[0]);
+			if (adc.Resault[0] == 99) {
+				EF_PutString((const uint8_t*) "Not Raining", 167, 65, ILI9341_RED, BG_COLOR, ILI9341_BLACK);
+			} else {
+				EF_PutString((const uint8_t*) "    Raining  ", 167, 65, ILI9341_CYAN, BG_COLOR, ILI9341_BLACK);
+			}
 			ConvertValuesToTFT(245, 110, "%d", adc.Resault[1]);
-			ConvertValuesToTFT(225, 10, "%d [%%]", adc.Resault[2]);
 		}
-		xStatus = xQueueReceive(xVeml7700Queue, &veml, pdMS_TO_TICKS(50));
+
+		xStatus = xQueueReceive(xVeml7700Queue, &veml, pdMS_TO_TICKS(0));
 		if (xStatus == pdPASS) {
 			if (veml.calc_values[0] < 100) {
 				ConvertValuesToTFT(245, 157, "%d   ", veml.calc_values[0]);
@@ -323,19 +345,21 @@ void vLCDTask(void *pvParameters) {
 				ConvertValuesToTFT(245, 157, "%d", veml.calc_values[0]);
 			}
 		}
-		xStatus = xQueueReceive(xBME680Queue, &Bme680, pdMS_TO_TICKS(50));
+
+		xStatus = xQueueReceive(xBME680Queue, &Bme680, pdMS_TO_TICKS(0));
 		if (xStatus == pdPASS) {
-			ConvertValuesToTFT(55, 110, "%.2f  ", Bme680.Temperature_Calc);
-			ConvertValuesToTFT(55, 65, "%.2f  ", Bme680.Pressure_Calc / 100.0f);
-			ConvertValuesToTFT(55, 160, "%.2f  ", Bme680.Humidity_Calc);
-			ConvertValuesToTFT(55, 200, "%.2f  ", Bme680.IAQ_Calc);
+			ConvertValuesToTFT(55, 110, "%.2f  ", Bme680.Mean_Measurments[0]);
+			ConvertValuesToTFT(55, 65, "%.2f  ", Bme680.Mean_Measurments[1] / 100.0f);
+			ConvertValuesToTFT(55, 160, "%.2f  ", Bme680.Mean_Measurments[2]);
+			ConvertValuesToTFT(55, 200, "%.2f  ", Bme680.Mean_Measurments[3]);
 		}
 
-		if (adc.Resault[2] > 75) {
+		if (adc.Resault[2] > 82) {
 			if (adc.Resault[2] >= 100) {
 				percentage = 24;
+			} else {
+				percentage = ((adc.Resault[2] % 25U));
 			}
-			percentage = ((adc.Resault[2] % 25U));
 			GFX_DrawFillRectangle(282, 12, percentage, 11, ILI9341_GREEN);
 			HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 		} else {
@@ -347,7 +371,7 @@ void vLCDTask(void *pvParameters) {
 		switch (flag) {
 		case 0x01:
 			ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
-			EF_PutString((const uint8_t*) "Widget Values", 100, 50, ILI9341_MAGENTA, BG_TRANSPARENT, 0);
+			EF_PutString((const uint8_t*) "Widget Values", 100, 10, ILI9341_MAGENTA, BG_TRANSPARENT, 0);
 			break;
 		case 0x02:
 			ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
@@ -361,6 +385,9 @@ void vLCDTask(void *pvParameters) {
 			DelayTick = 0;
 		}
 
+		xSemaphoreTake(xMutexI2C, portMAX_DELAY);
+		ILI9341_TFTSLEEP_ON();
+		xSemaphoreGive(xMutexI2C);
 	}
 }
 
@@ -428,7 +455,7 @@ void vVeml7700Task(void *pvParameters) {
 
 		xQueueSend(xVeml7700Queue, &Veml_data, 0);
 
-		vTaskDelay(pdMS_TO_TICKS(500));
+		vTaskDelay(pdMS_TO_TICKS(250));
 	}
 }
 
@@ -436,8 +463,14 @@ void vVeml7700Task(void *pvParameters) {
 void vEthernetTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
+	extern struct netif gnetif;
+
+	MX_LWIP_Init();
+	ethernetif_notify_conn_changed (&gnetif );
+
 	for (;;) {
-		vTaskDelay(pdMS_TO_TICKS(1000));
+
+		vTaskDelay(pdMS_TO_TICKS(100));
 	}
 }
 

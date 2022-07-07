@@ -413,6 +413,7 @@ void BME680_calc_raw_values(BME680_TypeDef *BME680, BME680_Calib_TypeDef *dev) {
 	BME680->Temperature_Calc = calc_temperature(BME680->Temperature_Raw, dev);
 	BME680->Pressure_Calc = calc_pressure(BME680->Pressure_Raw, dev);
 	BME680->Humidity_Calc = calc_humidity(BME680->Humidity_Raw, dev);
+	BME680->IAQ_Calc = Bme680_Calc_IAQ(BME680, dev);
 }
 
 uint8_t Bme680_Init(BME680_TypeDef *BME680, BME680_Calib_TypeDef *calib, I2C_HandleTypeDef *i2c, uint8_t Address) {
@@ -558,4 +559,11 @@ float Bme680_Calc_IAQ(BME680_TypeDef *BME680, BME680_Calib_TypeDef *dev) {
 		gas_score = 100.0f - (hum_weighting * 100.0f);
 	}
 	return (hum_score + gas_score);
+}
+
+void Bme680_MeanMeasurements(BME680_TypeDef *BME680) {
+	BME680->Mean_Measurments[0] += BME680->Temperature_Calc;
+	BME680->Mean_Measurments[1] += BME680->Pressure_Calc;
+	BME680->Mean_Measurments[2] += BME680->Humidity_Calc;
+	BME680->Mean_Measurments[3] += BME680->IAQ_Calc;
 }
