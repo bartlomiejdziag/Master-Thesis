@@ -1,5 +1,6 @@
 #include "main.h"
 #include "FreeRTOS.h"
+#include <lwip.h>
 #include "timers.h"
 #include "semphr.h"
 #include "XPT2046.h"
@@ -33,3 +34,14 @@ void vTimerDelayCallback(TimerHandle_t xTimer) {
 	configASSERT(xTimer);
 	DelayTick = 1;
 }
+
+void ethernetif_notify_conn_changed(struct netif *netif) {
+	/* NOTE: This is function could be implemented in user file when the callback is needed, */
+	if (netif_is_link_up(netif)) {
+		HAL_GPIO_WritePin( LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+	} else {
+		HAL_GPIO_WritePin( LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+	}
+}
+
+
