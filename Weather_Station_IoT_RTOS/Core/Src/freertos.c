@@ -57,7 +57,6 @@
 #define LOW_PRIORITY 1
 #define NORMAL_PRIORITY 2
 #define HIGH_PRIORITY 3
-#define MAX_PRIORITY 4
 
 #define ADC_SAMPLES 3
 #define VEML7700_SAMPLES 2
@@ -223,8 +222,6 @@ void MX_FREERTOS_Init(void) {
 /* USER CODE END Header_StartDefaultTask */
 void StartDefaultTask(void *argument)
 {
-  /* init code for LWIP */
-//  MX_LWIP_Init();
   /* USER CODE BEGIN StartDefaultTask */
 	if ( xTimerStart( xTimerIdle, 0 ) != pdPASS) {
 		printf("Timer not created\n\r");
@@ -279,7 +276,6 @@ void vBme680Task(void *pvParameters) {
 			BME680_calc_raw_values(&Bme680, &Bme680_calib);
 			Bme680_MeanMeasurements(&Bme680);
 			Bme680_Set_Mode(&Bme680, BME680_MODE_SLEEP);
-			vTaskDelay(pdMS_TO_TICKS(10));
 		}
 		xSemaphoreGive(xMutexI2C);
 
@@ -300,7 +296,7 @@ void vHeartBeatTask(void *pvParameters) {
 
 	for (;;) {
 		HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
-		vTaskDelay(pdMS_TO_TICKS(1000));
+		vTaskDelay(pdMS_TO_TICKS(2000));
 	}
 }
 
@@ -322,11 +318,6 @@ void vLCDTask(void *pvParameters) {
 	ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
 
 	for (;;) {
-
-		xSemaphoreTake(xMutexI2C, portMAX_DELAY);
-		ILI9341_TFTSLEEP_OFF();
-		xSemaphoreGive(xMutexI2C);
-
 		xStatus = xQueueReceive(xAnalogQueue, &adc, pdMS_TO_TICKS(0));
 		if (xStatus == pdPASS) {
 			if (adc.Resault[0] == 99) {
@@ -384,10 +375,6 @@ void vLCDTask(void *pvParameters) {
 			ILI9341_ClearDisplay(ILI9341_BLACK, 282 + percentage, 12, 1, 11);
 			DelayTick = 0;
 		}
-
-		xSemaphoreTake(xMutexI2C, portMAX_DELAY);
-		ILI9341_TFTSLEEP_ON();
-		xSemaphoreGive(xMutexI2C);
 	}
 }
 
@@ -466,11 +453,10 @@ void vEthernetTask(void *pvParameters) {
 	extern struct netif gnetif;
 
 	MX_LWIP_Init();
-	ethernetif_notify_conn_changed (&gnetif );
-
+	ethernetif_notify_conn_changed(&gnetif);
 	for (;;) {
 
-		vTaskDelay(pdMS_TO_TICKS(100));
+		vTaskSuspend(NULL);
 	}
 }
 

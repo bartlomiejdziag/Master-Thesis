@@ -32,7 +32,6 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "tcp_echo.h"
 #include "XPT2046.h"
 /* USER CODE END Includes */
 
