@@ -26,7 +26,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdarg.h>
-#include <lwip.h>
+#include <string.h>
+#include "lwip.h"
+#include "lwip/apps/mqtt.h"
+#include "lwip/apps/mqtt_priv.h"
+#include <ip_addr.h>
 #include "timers.h"
 #include "printf.h"
 #include "usart.h"
@@ -102,6 +106,97 @@ const osThreadAttr_t DefaultTask_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
+void vAnalogTask(void *pvParameters);
+void vEthernetTask(void *pvParameters);
+void vBme680Task(void *pvParameters);
+void vLCDTask(void *pvParameters);
+void vLCDTouchTask(void *pvParameters);
+void vVeml7700Task(void *pvParameters);
+void vEthernetTask(void *pvParameters);
+void vHeartBeatTask(void *pvParameters);
+void vTimerIdleCallback(TimerHandle_t xTimer);
+void vTimerDelayCallback(TimerHandle_t xTimer);
+err_t example_do_connect(mqtt_client_t *client);
+
+static int inpub_id;
+static void mqtt_incoming_publish_cb(void *arg, const char *topic, u32_t tot_len)
+{
+  printf("Incoming publish at topic %s with total length %u\n\r", topic, (unsigned int)tot_len);
+
+  /* Decode topic string into a user defined reference */
+  if(strcmp(topic, "print_payload") == 0) {
+    inpub_id = 0;
+  } else if(topic[0] == 'A') {
+    /* All topics starting with 'A' might be handled at the same way */
+    inpub_id = 1;
+  } else {
+    /* For all other topics */
+    inpub_id = 2;
+  }
+}
+
+static void mqtt_incoming_data_cb(void *arg, const u8_t *data, u16_t len, u8_t flags)
+{
+  printf("Incoming publish payload with length %d, flags %u\n\r", len, (unsigned int)flags);
+
+  if(flags & MQTT_DATA_FLAG_LAST) {
+    /* Last fragment of payload received (or whole part if payload fits receive buffer
+       See MQTT_VAR_HEADER_BUFFER_LEN)  */
+
+    /* Call function or do action depending on reference, in this case inpub_id */
+    if(inpub_id == 0) {
+      /* Don't trust the publisher, check zero termination */
+      if(data[len-1] == 0) {
+        printf("mqtt_incoming_data_cb: %s\n", (const char *)data);
+      }
+    } else if(inpub_id == 1) {
+      /* Call an 'A' function... */
+    } else {
+      printf("mqtt_incoming_data_cb: Ignoring payload...\n\r");
+    }
+  } else {
+    /* Handle fragmented payload, store in buffer, write to file or whatever */
+  }
+}
+
+static void mqtt_sub_request_cb(void *arg, err_t result)
+{
+  /* Just print the result code here for simplicity,
+     normal behaviour would be to take some action if subscribe fails like
+     notifying user, retry subscribe or disconnect from server */
+  printf("Subscribe result: %d\n\r", result);
+}
+
+static void mqtt_connection_cb(mqtt_client_t *client, void *arg, mqtt_connection_status_t status)
+{
+  err_t err;
+  if(status == MQTT_CONNECT_ACCEPTED) {
+    printf("mqtt_connection_cb: Successfully connected\n\r");
+
+    /* Setup callback for incoming publish requests */
+    mqtt_set_inpub_callback(client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, arg);
+
+    /* Subscribe to a topic named "subtopic" with QoS level 1, call mqtt_sub_request_cb with result */
+    err = mqtt_subscribe(client, "lwip_test", 1, mqtt_sub_request_cb, arg);
+
+    if(err != ERR_OK) {
+      printf("mqtt_subscribe return: %d\n\r", err);
+    }
+  } else {
+    printf("mqtt_connection_cb: Disconnected, reason: %d\n\r", status);
+
+    /* Its more nice to be connected, so try to reconnect */
+    example_do_connect(client);
+  }
+}
+
+/* Called when publish is complete either with sucess or failure */
+static void mqtt_pub_request_cb(void *arg, err_t result)
+{
+  if(result != ERR_OK) {
+    printf("Publish result: %d\n\r", result);
+  }
+}
 
 static inline uint16_t* xCalcAdc(uint16_t *adc, uint16_t *resault) {
 	for (uint8_t i = 0; i < ADC_SAMPLES; i++) {
@@ -125,16 +220,41 @@ static void ConvertValuesToTFT(uint16_t PosX, uint16_t PosY, char const *format,
 	EF_PutString((const uint8_t*)buf, PosX, PosY, ILI9341_WHITE, BG_COLOR, ILI9341_BLACK);
 }
 
-void vAnalogTask(void *pvParameters);
-void vEthernetTask(void *pvParameters);
-void vBme680Task(void *pvParameters);
-void vLCDTask(void *pvParameters);
-void vLCDTouchTask(void *pvParameters);
-void vVeml7700Task(void *pvParameters);
-void vEthernetTask(void *pvParameters);
-void vHeartBeatTask(void *pvParameters);
-void vTimerIdleCallback(TimerHandle_t xTimer);
-void vTimerDelayCallback(TimerHandle_t xTimer);
+err_t example_do_connect(mqtt_client_t *client)
+{
+
+    struct mqtt_connect_client_info_t ci;
+    err_t err;
+    ip_addr_t server;
+
+    memset(&ci, 0, sizeof(ci));
+
+    ci.client_id = "lwip_test";
+    ci.client_user = "xxx";
+    ci.client_pass = "xxx";
+
+    ip4_addr_set_u32(&server, ipaddr_addr("192.168.1.13"));
+    err = mqtt_client_connect(client, &server, MQTT_PORT, mqtt_connection_cb, 0, &ci);
+
+    if (err != ERR_OK) {
+        printf("mqtt_connect return %d\n\r", err);
+    }
+
+    return err;
+}
+
+void example_publish(mqtt_client_t *client, void *arg)
+{
+  const char *pub_payload= "Test MQTT";
+  err_t err;
+  u8_t qos = 1; /* 0 1 or 2, see MQTT specification */
+  u8_t retain = 0; /* No don't retain such crappy payload... */
+  err = mqtt_publish(client, "lwip_test", pub_payload, strlen(pub_payload), qos, retain, mqtt_pub_request_cb, arg);
+  if(err != ERR_OK) {
+    printf("Publish err: %d\n\r", err);
+  }
+}
+
 /* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void *argument);
@@ -271,18 +391,10 @@ void vBme680Task(void *pvParameters) {
 
 	for (;;) {
 		xSemaphoreTake(xMutexI2C, portMAX_DELAY);
-		for(uint32_t i = 0; i < 5; i++) {
-			Bme680_Set_Mode(&Bme680, BME680_MODE_FORCE);
-			BME680_calc_raw_values(&Bme680, &Bme680_calib);
-			Bme680_MeanMeasurements(&Bme680);
-			Bme680_Set_Mode(&Bme680, BME680_MODE_SLEEP);
-		}
+		Bme680_Set_Mode(&Bme680, BME680_MODE_FORCE);
+		BME680_calc_raw_values(&Bme680, &Bme680_calib);
+		Bme680_Set_Mode(&Bme680, BME680_MODE_SLEEP);
 		xSemaphoreGive(xMutexI2C);
-
-		Bme680.Mean_Measurments[0] /= 6.00f;
-		Bme680.Mean_Measurments[1] /= 5.99f;
-		Bme680.Mean_Measurments[2] /= 6.00f;
-		Bme680.Mean_Measurments[3] /= 6.00f;
 
 		xQueueSend(xBME680Queue, &Bme680, 0);
 
@@ -339,10 +451,10 @@ void vLCDTask(void *pvParameters) {
 
 		xStatus = xQueueReceive(xBME680Queue, &Bme680, pdMS_TO_TICKS(0));
 		if (xStatus == pdPASS) {
-			ConvertValuesToTFT(55, 110, "%.2f  ", Bme680.Mean_Measurments[0]);
-			ConvertValuesToTFT(55, 65, "%.2f  ", Bme680.Mean_Measurments[1] / 100.0f);
-			ConvertValuesToTFT(55, 160, "%.2f  ", Bme680.Mean_Measurments[2]);
-			ConvertValuesToTFT(55, 200, "%.2f  ", Bme680.Mean_Measurments[3]);
+			ConvertValuesToTFT(55, 110, "%.2f  ", Bme680.Temperature_Calc);
+			ConvertValuesToTFT(55, 65, "%.2f  ", (Bme680.Pressure_Calc / 100.0f) + 10.0f);
+			ConvertValuesToTFT(55, 160, "%.2f  ", Bme680.Humidity_Calc);
+			ConvertValuesToTFT(55, 200, "%.2f  ", Bme680.IAQ_Calc);
 		}
 
 		if (adc.Resault[2] > 82) {
@@ -450,13 +562,22 @@ void vVeml7700Task(void *pvParameters) {
 void vEthernetTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
+	err_t err = 1;
 	extern struct netif gnetif;
+	mqtt_client_t static_client = { 0 };
 
 	MX_LWIP_Init();
 	ethernetif_notify_conn_changed(&gnetif);
+
 	for (;;) {
 
-		vTaskSuspend(NULL);
+		if (err != ERR_OK) {
+			err = example_do_connect(&static_client);
+		} else {
+			example_publish(&static_client, 0);
+		}
+
+		vTaskDelay(pdMS_TO_TICKS(2000));
 	}
 }
 
