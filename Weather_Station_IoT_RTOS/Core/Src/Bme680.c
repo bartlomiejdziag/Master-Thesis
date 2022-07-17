@@ -410,9 +410,9 @@ void BME680_calc_raw_values(BME680_TypeDef *BME680, BME680_Calib_TypeDef *dev) {
 	BME680->Pressure_Raw = Bme680_Read_Pressure(BME680);
 	BME680->Humidity_Raw = Bme680_Read_Humidity(BME680);
 
-	BME680->Temperature_Calc = calc_temperature(BME680->Temperature_Raw, dev);
-	BME680->Pressure_Calc = calc_pressure(BME680->Pressure_Raw, dev);
-	BME680->Humidity_Calc = calc_humidity(BME680->Humidity_Raw, dev);
+	BME680->Temperature_Calc = (calc_temperature(BME680->Temperature_Raw, dev) - 4.0f);
+	BME680->Pressure_Calc = ((calc_pressure(BME680->Pressure_Raw, dev) / 100.0f) + 10.0f);
+	BME680->Humidity_Calc = (calc_humidity(BME680->Humidity_Raw, dev) + 5.0f);
 	BME680->IAQ_Calc = Bme680_Calc_IAQ(BME680, dev);
 }
 

@@ -27,10 +27,10 @@
 /* USER CODE BEGIN Includes */
 #include <stdarg.h>
 #include <string.h>
-#include "lwip.h"
-#include "lwip/apps/mqtt.h"
-#include "lwip/apps/mqtt_priv.h"
 #include <ip_addr.h>
+#include "lwip.h"
+#include "lwip/apps/mqtt_priv.h"
+#include "MQTT_Interface.h"
 #include "timers.h"
 #include "printf.h"
 #include "usart.h"
@@ -116,87 +116,6 @@ void vEthernetTask(void *pvParameters);
 void vHeartBeatTask(void *pvParameters);
 void vTimerIdleCallback(TimerHandle_t xTimer);
 void vTimerDelayCallback(TimerHandle_t xTimer);
-err_t example_do_connect(mqtt_client_t *client);
-
-static int inpub_id;
-static void mqtt_incoming_publish_cb(void *arg, const char *topic, u32_t tot_len)
-{
-  printf("Incoming publish at topic %s with total length %u\n\r", topic, (unsigned int)tot_len);
-
-  /* Decode topic string into a user defined reference */
-  if(strcmp(topic, "print_payload") == 0) {
-    inpub_id = 0;
-  } else if(topic[0] == 'A') {
-    /* All topics starting with 'A' might be handled at the same way */
-    inpub_id = 1;
-  } else {
-    /* For all other topics */
-    inpub_id = 2;
-  }
-}
-
-static void mqtt_incoming_data_cb(void *arg, const u8_t *data, u16_t len, u8_t flags)
-{
-  printf("Incoming publish payload with length %d, flags %u\n\r", len, (unsigned int)flags);
-
-  if(flags & MQTT_DATA_FLAG_LAST) {
-    /* Last fragment of payload received (or whole part if payload fits receive buffer
-       See MQTT_VAR_HEADER_BUFFER_LEN)  */
-
-    /* Call function or do action depending on reference, in this case inpub_id */
-    if(inpub_id == 0) {
-      /* Don't trust the publisher, check zero termination */
-      if(data[len-1] == 0) {
-        printf("mqtt_incoming_data_cb: %s\n", (const char *)data);
-      }
-    } else if(inpub_id == 1) {
-      /* Call an 'A' function... */
-    } else {
-      printf("mqtt_incoming_data_cb: Ignoring payload...\n\r");
-    }
-  } else {
-    /* Handle fragmented payload, store in buffer, write to file or whatever */
-  }
-}
-
-static void mqtt_sub_request_cb(void *arg, err_t result)
-{
-  /* Just print the result code here for simplicity,
-     normal behaviour would be to take some action if subscribe fails like
-     notifying user, retry subscribe or disconnect from server */
-  printf("Subscribe result: %d\n\r", result);
-}
-
-static void mqtt_connection_cb(mqtt_client_t *client, void *arg, mqtt_connection_status_t status)
-{
-  err_t err;
-  if(status == MQTT_CONNECT_ACCEPTED) {
-    printf("mqtt_connection_cb: Successfully connected\n\r");
-
-    /* Setup callback for incoming publish requests */
-    mqtt_set_inpub_callback(client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, arg);
-
-    /* Subscribe to a topic named "subtopic" with QoS level 1, call mqtt_sub_request_cb with result */
-    err = mqtt_subscribe(client, "lwip_test", 1, mqtt_sub_request_cb, arg);
-
-    if(err != ERR_OK) {
-      printf("mqtt_subscribe return: %d\n\r", err);
-    }
-  } else {
-    printf("mqtt_connection_cb: Disconnected, reason: %d\n\r", status);
-
-    /* Its more nice to be connected, so try to reconnect */
-    example_do_connect(client);
-  }
-}
-
-/* Called when publish is complete either with sucess or failure */
-static void mqtt_pub_request_cb(void *arg, err_t result)
-{
-  if(result != ERR_OK) {
-    printf("Publish result: %d\n\r", result);
-  }
-}
 
 static inline uint16_t* xCalcAdc(uint16_t *adc, uint16_t *resault) {
 	for (uint8_t i = 0; i < ADC_SAMPLES; i++) {
@@ -220,41 +139,21 @@ static void ConvertValuesToTFT(uint16_t PosX, uint16_t PosY, char const *format,
 	EF_PutString((const uint8_t*)buf, PosX, PosY, ILI9341_WHITE, BG_COLOR, ILI9341_BLACK);
 }
 
-err_t example_do_connect(mqtt_client_t *client)
-{
+static void Battery_Control(Analog_t *adc, uint8_t *percentage) {
+	if (adc->Resault[2] >= 100) {
+		*percentage = 24;
+	} else {
+		*percentage = ((adc->Resault[2] % 25U));
+	}
 
-    struct mqtt_connect_client_info_t ci;
-    err_t err;
-    ip_addr_t server;
+	GFX_DrawFillRectangle(282, 12, *percentage, 11, ILI9341_GREEN);
 
-    memset(&ci, 0, sizeof(ci));
-
-    ci.client_id = "lwip_test";
-    ci.client_user = "xxx";
-    ci.client_pass = "xxx";
-
-    ip4_addr_set_u32(&server, ipaddr_addr("192.168.1.13"));
-    err = mqtt_client_connect(client, &server, MQTT_PORT, mqtt_connection_cb, 0, &ci);
-
-    if (err != ERR_OK) {
-        printf("mqtt_connect return %d\n\r", err);
-    }
-
-    return err;
+	if (adc->Resault[2] > 82) {
+		HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+	} else {
+		HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+	}
 }
-
-void example_publish(mqtt_client_t *client, void *arg)
-{
-  const char *pub_payload= "Test MQTT";
-  err_t err;
-  u8_t qos = 1; /* 0 1 or 2, see MQTT specification */
-  u8_t retain = 0; /* No don't retain such crappy payload... */
-  err = mqtt_publish(client, "lwip_test", pub_payload, strlen(pub_payload), qos, retain, mqtt_pub_request_cb, arg);
-  if(err != ERR_OK) {
-    printf("Publish err: %d\n\r", err);
-  }
-}
-
 /* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void *argument);
@@ -319,12 +218,12 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
 	xTaskCreate(vAnalogTask, "AnalogTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vHeartBeatTask, "HeartBeatTask", 128, (void*) 1, LOW_PRIORITY, NULL);
+	xTaskCreate(vHeartBeatTask, "HeartBeatTask", 256, (void*) 1, LOW_PRIORITY, NULL);
 	xTaskCreate(vBme680Task, "Bme680Task", 512, (void*) 1, NORMAL_PRIORITY, NULL);
 	xTaskCreate(vLCDTask, "LCDTask", 512, (void*) 1, HIGH_PRIORITY, &xLCDHandle);
 	xTaskCreate(vLCDTouchTask, "LCDTouchTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
 	xTaskCreate(vVeml7700Task, "Veml7700Task", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vEthernetTask, "EthernetTask", 512, (void*) 1, HIGH_PRIORITY, NULL);
+	xTaskCreate(vEthernetTask, "EthernetTask", 1024, (void*) 1, HIGH_PRIORITY, NULL);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -368,6 +267,7 @@ void vAnalogTask(void *pvParameters) {
 	HAL_ADC_Start_DMA(&hadc1, (uint32_t*) adc.AdcRawValue, 3);
 
 	for (;;) {
+
 		xCalcAdc(adc.AdcRawValue, adc.Resault);
 		xQueueSend(xAnalogQueue, &adc, 0);
 		vTaskDelay(pdMS_TO_TICKS(500));
@@ -418,7 +318,7 @@ void vLCDTask(void *pvParameters) {
 
 	BaseType_t xStatus;
 
-	uint8_t percentage;
+	uint8_t percentage = 0;
 	uint32_t flag;
 
 	Analog_t adc = {0};
@@ -430,6 +330,7 @@ void vLCDTask(void *pvParameters) {
 	ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
 
 	for (;;) {
+
 		xStatus = xQueueReceive(xAnalogQueue, &adc, pdMS_TO_TICKS(0));
 		if (xStatus == pdPASS) {
 			if (adc.Resault[0] == 99) {
@@ -452,22 +353,12 @@ void vLCDTask(void *pvParameters) {
 		xStatus = xQueueReceive(xBME680Queue, &Bme680, pdMS_TO_TICKS(0));
 		if (xStatus == pdPASS) {
 			ConvertValuesToTFT(55, 110, "%.2f  ", Bme680.Temperature_Calc);
-			ConvertValuesToTFT(55, 65, "%.2f  ", (Bme680.Pressure_Calc / 100.0f) + 10.0f);
+			ConvertValuesToTFT(55, 65, "%.2f  ", Bme680.Pressure_Calc);
 			ConvertValuesToTFT(55, 160, "%.2f  ", Bme680.Humidity_Calc);
 			ConvertValuesToTFT(55, 200, "%.2f  ", Bme680.IAQ_Calc);
 		}
 
-		if (adc.Resault[2] > 82) {
-			if (adc.Resault[2] >= 100) {
-				percentage = 24;
-			} else {
-				percentage = ((adc.Resault[2] % 25U));
-			}
-			GFX_DrawFillRectangle(282, 12, percentage, 11, ILI9341_GREEN);
-			HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
-		} else {
-			HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-		}
+		Battery_Control(&adc, &percentage);
 
 		xTaskNotifyWait(0, 0xFFFFFFFF, &flag, 100);
 
@@ -537,6 +428,7 @@ void vVeml7700Task(void *pvParameters) {
 	xSemaphoreGive(xMutexI2C);
 
 	for (;;) {
+
 		xSemaphoreTake(xMutexI2C, portMAX_DELAY);
 		Veml7700_Power_On(&Veml7700);
 		xSemaphoreGive(xMutexI2C);
@@ -566,17 +458,45 @@ void vEthernetTask(void *pvParameters) {
 	extern struct netif gnetif;
 	mqtt_client_t static_client = { 0 };
 
+	BaseType_t xStatus;
+
+	Analog_t adc = {0};
+	Veml7700_t veml = {0};
+	BME680_TypeDef Bme680 = {0};
+
 	MX_LWIP_Init();
 	ethernetif_notify_conn_changed(&gnetif);
 
 	for (;;) {
+//		uint16_t data = uxTaskGetStackHighWaterMark(NULL);
+//		printf("[stack: %d] EthernetTask\n\r", data);
 
 		if (err != ERR_OK) {
-			err = example_do_connect(&static_client);
+			err = mqtt_user_connect(&static_client);
 		} else {
-			example_publish(&static_client, 0);
-		}
+			xStatus = xQueueReceive(xAnalogQueue, &adc, pdMS_TO_TICKS(0));
+			if (xStatus == pdPASS) {
+				if (adc.Resault[0] == 99) {
+					mqtt_user_publish(&static_client, 0, "Not Raining | Ground Moisture: %d%%", adc.Resault[1]);
+				} else {
+					mqtt_user_publish(&static_client, 0, "Raining | Ground Moisture: %d%%", adc.Resault[1]);
+				}
+			}
 
+			xStatus = xQueueReceive(xVeml7700Queue, &veml, pdMS_TO_TICKS(0));
+			if (xStatus == pdPASS) {
+				mqtt_user_publish(&static_client, 0, "Lux: %d lx", veml.calc_values[0]);
+			}
+
+			xStatus = xQueueReceive(xBME680Queue, &Bme680, pdMS_TO_TICKS(0));
+			if (xStatus == pdPASS) {
+				mqtt_user_publish(&static_client, 0,
+						"Temperature: %.2f *C | Pressure: %.2f hPa | Humidity: %.2f%% | IAQ: %.2f",
+						Bme680.Temperature_Calc,
+						(Bme680.Pressure_Calc),
+						Bme680.Humidity_Calc, Bme680.IAQ_Calc);
+			}
+		}
 		vTaskDelay(pdMS_TO_TICKS(2000));
 	}
 }

@@ -53,7 +53,7 @@ extern "C" {
  * Output ring-buffer size, must be able to fit largest outgoing publish message topic+payloads
  */
 #ifndef MQTT_OUTPUT_RINGBUF_SIZE
-#define MQTT_OUTPUT_RINGBUF_SIZE 1024
+#define MQTT_OUTPUT_RINGBUF_SIZE 256
 #endif
 
 /**
@@ -82,7 +82,7 @@ extern "C" {
  * Publish, subscribe and unsubscribe request timeout in seconds.
  */
 #ifndef MQTT_REQ_TIMEOUT
-#define MQTT_REQ_TIMEOUT 60
+#define MQTT_REQ_TIMEOUT 30
 #endif
 
 /**

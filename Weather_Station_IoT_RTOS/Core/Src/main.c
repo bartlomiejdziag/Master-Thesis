@@ -24,7 +24,8 @@
 #include "dma.h"
 #include "i2c.h"
 #include "lptim.h"
-#include "lwip.h"
+#include "mbedtls.h"
+#include "rng.h"
 #include "spi.h"
 #include "usart.h"
 #include "usb_otg.h"
@@ -105,6 +106,8 @@ int main(void)
   MX_SPI3_Init();
   MX_I2C1_Init();
   MX_USB_OTG_FS_PCD_Init();
+  MX_RNG_Init();
+  MX_MBEDTLS_Init();
 
   /* Initialize interrupts */
   MX_NVIC_Init();
