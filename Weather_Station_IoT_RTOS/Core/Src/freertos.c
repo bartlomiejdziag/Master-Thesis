@@ -141,7 +141,7 @@ static void ConvertValuesToTFT(uint16_t PosX, uint16_t PosY, char const *format,
 
 static void Battery_Control(Analog_t *adc, uint8_t *percentage) {
 	if (adc->Resault[2] >= 100) {
-		*percentage = 24;
+		*percentage = 25;
 	} else {
 		*percentage = ((adc->Resault[2] % 25U));
 	}

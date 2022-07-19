@@ -95,11 +95,12 @@ err_t mqtt_user_connect(mqtt_client_t *client)
     memset(&ci, 0, sizeof(ci));
 
     ci.client_id = "lwip_test";
-    ci.client_user = "xxx";
-    ci.client_pass = "xxx";
+    ci.client_user = "sammy";
+    ci.client_pass = "Password";
 
     ip4_addr_set_u32(&server, ipaddr_addr("192.168.1.13"));
-    err = mqtt_client_connect(client, &server, MQTT_PORT, mqtt_connection_cb, 0, &ci);
+
+    err = mqtt_client_connect(client, &server, MQTT_TLS_PORT, mqtt_connection_cb, 0, &ci);
 
     if (err != ERR_OK) {
         printf("mqtt_connect return %d\n\r", err);
