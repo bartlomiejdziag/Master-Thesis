@@ -5,7 +5,6 @@
 #include "MQTT_Interface.h"
 #include "printf.h"
 
-
 static int inpub_id;
 static void mqtt_incoming_publish_cb(void *arg, const char *topic, u32_t tot_len)
 {
@@ -127,4 +126,3 @@ void mqtt_user_publish(mqtt_client_t *client, void *arg, char const *format, ...
 		printf("Publish err: %d\n\r", err);
 	}
 }
-

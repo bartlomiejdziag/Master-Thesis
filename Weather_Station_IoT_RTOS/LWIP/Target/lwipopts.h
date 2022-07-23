@@ -31,6 +31,7 @@
 /* Within 'USER CODE' section, code will be kept by default at each generation */
 /* USER CODE BEGIN 0 */
 #define LWIP_ALTCP_TLS_MBEDTLS 1
+#define DNS_SERVER_ADDRESS(ipaddr) (ip4_addr_set_u32(ipaddr, ipaddr_addr("208.67.222.222")))
 /* USER CODE END 0 */
 
 #ifdef __cplusplus
@@ -49,8 +50,6 @@
 
 /* LwIP Stack Parameters (modified compared to initialization value in opt.h) -*/
 /* Parameters set in STM32CubeMX LwIP Configuration GUI -*/
-/*----- Value in opt.h for LWIP_DHCP: 0 -----*/
-#define LWIP_DHCP 1
 /*----- Value in opt.h for LWIP_DNS: 0 -----*/
 #define LWIP_DNS 1
 /*----- Value in opt.h for MEM_ALIGNMENT: 1 -----*/
@@ -61,6 +60,14 @@
 #define PBUF_POOL_BUFSIZE 1600
 /*----- Value in opt.h for LWIP_ETHERNET: LWIP_ARP || PPPOE_SUPPORT -*/
 #define LWIP_ETHERNET 1
+/*----- Default Value for LWIP_BROADCAST_PING: 0 ---*/
+#define LWIP_BROADCAST_PING 1
+/*----- Default Value for LWIP_MULTICAST_PING: 0 ---*/
+#define LWIP_MULTICAST_PING 1
+/*----- Default Value for DNS_MAX_NAME_LENGTH: 256 ---*/
+#define DNS_MAX_NAME_LENGTH 1024
+/*----- Default Value for DNS_MAX_SERVERS: 2 ---*/
+#define DNS_MAX_SERVERS 3
 /*----- Value in opt.h for LWIP_DNS_SECURE: (LWIP_DNS_SECURE_RAND_XID | LWIP_DNS_SECURE_NO_MULTIPLE_OUTSTANDING | LWIP_DNS_SECURE_RAND_SRC_PORT) -*/
 #define LWIP_DNS_SECURE 7
 /*----- Default Value for TCP_MSS: 536 ---*/

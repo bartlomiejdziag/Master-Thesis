@@ -46,7 +46,11 @@
 void MX_MBEDTLS_Init(void);
 
 /* USER CODE BEGIN 2 */
-
+int net_connect(void);
+int net_read(unsigned char *buffer, int len, int timeout_ms);
+int net_write(unsigned char *buffer, int len, int timeout_ms);
+void net_disconnect(void);
+void net_clear();
 /* USER CODE END 2 */
 
 #ifdef __cplusplus

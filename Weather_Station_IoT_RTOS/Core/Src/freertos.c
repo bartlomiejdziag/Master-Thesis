@@ -30,6 +30,7 @@
 #include <ip_addr.h>
 #include "lwip.h"
 #include "lwip/apps/mqtt_priv.h"
+#include "lwip/api.h"
 #include "MQTT_Interface.h"
 #include "timers.h"
 #include "printf.h"
@@ -48,6 +49,10 @@
 #include "EnhancedFonts/times_new_roma_12pts_bold.h"
 #include "background.h"
 #include "XPT2046.h"
+
+#include "mbedtls.h"
+
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -65,6 +70,7 @@
 #define ADC_SAMPLES 3
 #define VEML7700_SAMPLES 2
 #define BME680_SAMPLES 4
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -75,8 +81,8 @@
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
 
-TaskHandle_t xLCDHandle = NULL;
-SemaphoreHandle_t xMutexPrintf, xMutexIdle, xMutexI2C;
+TaskHandle_t xLCDHandle = NULL, xTCPHandle = NULL;
+SemaphoreHandle_t xMutexPrintf, xMutexIdle, xMutexI2C, xTCPSem;
 QueueHandle_t xAnalogQueue, xVeml7700Queue, xBME680Queue;
 TimerHandle_t xTimerIdle, xTimerDelay;
 
@@ -95,6 +101,14 @@ typedef struct {
 	uint16_t calc_values[2];
 } Veml7700_t;
 
+static struct netconn *conn;
+static struct netbuf *buf;
+static ip_addr_t *addr, dest_addr;
+static unsigned short port, dest_port;
+char msgc[100];
+char smsgc[200];
+int indx = 0;
+
 /* USER CODE END Variables */
 /* Definitions for DefaultTask */
 osThreadId_t DefaultTaskHandle;
@@ -112,7 +126,8 @@ void vBme680Task(void *pvParameters);
 void vLCDTask(void *pvParameters);
 void vLCDTouchTask(void *pvParameters);
 void vVeml7700Task(void *pvParameters);
-void vEthernetTask(void *pvParameters);
+void vMQTTTask(void *pvParameters);
+void vHTTPTask(void *pvParameters);
 void vHeartBeatTask(void *pvParameters);
 void vTimerIdleCallback(TimerHandle_t xTimer);
 void vTimerDelayCallback(TimerHandle_t xTimer);
@@ -152,6 +167,98 @@ static void Battery_Control(Analog_t *adc, uint8_t *percentage) {
 		HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 	} else {
 		HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+	}
+}
+
+void tcpclient_init (void)
+{
+	xTCPSem = xSemaphoreCreateMutex();  // the semaphore would prevent simultaneous access to tcpsend
+	xTaskCreate(vHTTPTask, "HTTPTask", 1024, (void*) 1, HIGH_PRIORITY, &xTCPHandle);
+	vTaskSuspend(xTCPHandle);
+}
+
+void tcpsend(char *data)
+{
+	sprintf(smsgc, "index value = %d\n", indx++);
+	// semaphore must be taken before accessing the tcpsend function
+	xSemaphoreTake(xTCPSem, pdMS_TO_TICKS(500));
+	// send the data to the connected connection
+	netconn_write(conn, data, strlen(data), NETCONN_COPY);
+	// relaese the semaphore
+	xSemaphoreGive(xTCPSem);
+}
+
+static void tcpinit(void)
+{
+	err_t err, connect_error;
+
+	/* Create a new connection identifier. */
+	conn = netconn_new(NETCONN_TCP);
+
+	if (conn!=NULL)
+	{
+		/* Bind connection to the port number 7 (port of the Client). */
+		err = netconn_bind(conn, IP_ADDR_ANY, 7);
+
+		if (err == ERR_OK)
+		{
+			/* The desination IP adress of the computer */
+			IP_ADDR4(&dest_addr, 192, 168, 1, 12);
+			dest_port = 2200;  // server port
+
+			/* Connect to the TCP Server */
+			connect_error = netconn_connect(conn, &dest_addr, dest_port);
+
+			// If the connection to the server is established, the following will continue, else delete the connection
+			if (connect_error == ERR_OK)
+			{
+				// Release the semaphore once the connection is successful
+				xSemaphoreGive(xTCPSem);
+				while (1)
+				{
+					/* wait until the data is sent by the server */
+					if (netconn_recv(conn, &buf) == ERR_OK)
+					{
+						/* Extract the address and port in case they are required */
+						addr = netbuf_fromaddr(buf);  // get the address of the client
+						port = netbuf_fromport(buf);  // get the Port of the client
+
+						/* If there is some data remaining to be sent, the following process will continue */
+						do
+						{
+
+							strncpy(msgc, buf->p->payload, buf->p->len);   // get the message from the server
+
+							// Or modify the message received, so that we can send it back to the server
+							sprintf(smsgc, "\"%s\" was sent by the Server\n", msgc);
+
+							// semaphore must be taken before accessing the tcpsend function
+							xSemaphoreTake(xTCPSem, pdMS_TO_TICKS(500));
+
+							// send the data to the TCP Server
+							tcpsend(smsgc);
+
+							memset(msgc, '\0', 100);  // clear the buffer
+						}
+						while (netbuf_next(buf) >0);
+
+						netbuf_delete(buf);
+					}
+				}
+			}
+
+			else
+			{
+				/* Close connection and discard connection identifier. */
+				netconn_close(conn);
+				netconn_delete(conn);
+			}
+		}
+		else
+		{
+			// if the binding wasn't successful, delete the netconn connection
+			netconn_delete(conn);
+		}
 	}
 }
 /* USER CODE END FunctionPrototypes */
@@ -223,7 +330,7 @@ void MX_FREERTOS_Init(void) {
 	xTaskCreate(vLCDTask, "LCDTask", 512, (void*) 1, HIGH_PRIORITY, &xLCDHandle);
 	xTaskCreate(vLCDTouchTask, "LCDTouchTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
 	xTaskCreate(vVeml7700Task, "Veml7700Task", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vEthernetTask, "EthernetTask", 1024, (void*) 1, HIGH_PRIORITY, NULL);
+	xTaskCreate(vMQTTTask, "vMQTTTask", 2048, (void*) 1, HIGH_PRIORITY, NULL);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -366,9 +473,11 @@ void vLCDTask(void *pvParameters) {
 		case 0x01:
 			ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
 			EF_PutString((const uint8_t*) "Widget Values", 100, 10, ILI9341_MAGENTA, BG_TRANSPARENT, 0);
+			vTaskResume(xTCPHandle);
 			break;
 		case 0x02:
 			ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
+			vTaskSuspend(xTCPHandle);
 			break;
 		default:
 			break;
@@ -451,7 +560,7 @@ void vVeml7700Task(void *pvParameters) {
 }
 
 /* Ethernet Task. LWIP and MQTT */
-void vEthernetTask(void *pvParameters) {
+void vMQTTTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
 	err_t err = 1;
@@ -465,14 +574,19 @@ void vEthernetTask(void *pvParameters) {
 	BME680_TypeDef Bme680 = {0};
 
 	MX_LWIP_Init();
+	MX_MBEDTLS_Init();
 	ethernetif_notify_conn_changed(&gnetif);
+	tcpclient_init();
 
 	for (;;) {
-//		uint16_t data = uxTaskGetStackHighWaterMark(NULL);
-//		printf("[stack: %d] EthernetTask\n\r", data);
+		uint16_t data = uxTaskGetStackHighWaterMark(NULL);
+		printf("[stack: %d] EthernetTask\n\r", data);
 
 		if (err != ERR_OK) {
 			err = mqtt_user_connect(&static_client);
+//			net_clear();
+//			MX_MBEDTLS_Init();
+//			net_connect();
 		} else {
 			xStatus = xQueueReceive(xAnalogQueue, &adc, pdMS_TO_TICKS(0));
 			if (xStatus == pdPASS) {
@@ -497,11 +611,17 @@ void vEthernetTask(void *pvParameters) {
 						Bme680.Humidity_Calc, Bme680.IAQ_Calc);
 			}
 		}
+
+
+
 		vTaskDelay(pdMS_TO_TICKS(2000));
 	}
 }
 
-
+void vHTTPTask(void *pvParameters) {
+	configASSERT(((uint32_t ) pvParameters) == 1);
+	tcpinit();
+}
 void _putchar(char character) {
 // send char to console etc.
 	xSemaphoreTake(xMutexPrintf, portMAX_DELAY);
