@@ -70,9 +70,6 @@ static void mqtt_connection_cb(mqtt_client_t *client, void *arg, mqtt_connection
     }
   } else {
     printf("mqtt_connection_cb: Disconnected, reason: %d\n\r", status);
-
-    /* Its more nice to be connected, so try to reconnect */
-    mqtt_user_connect(client);
   }
 }
 
@@ -108,7 +105,7 @@ err_t mqtt_user_connect(mqtt_client_t *client)
     return err;
 }
 
-void mqtt_user_publish(mqtt_client_t *client, void *arg, char const *format, ...) {
+err_t mqtt_user_publish(mqtt_client_t *client, void *arg, char const *format, ...) {
 
 	err_t err;
 	u8_t qos = 1; /* 0 1 or 2, see MQTT specification */
@@ -125,4 +122,6 @@ void mqtt_user_publish(mqtt_client_t *client, void *arg, char const *format, ...
 	if (err != ERR_OK) {
 		printf("Publish err: %d\n\r", err);
 	}
+
+	return err;
 }
