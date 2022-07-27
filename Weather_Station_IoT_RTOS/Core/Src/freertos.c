@@ -86,7 +86,7 @@ extern TaskHandle_t xTCPHandle;
 
 TaskHandle_t xLCDHandle = NULL;
 SemaphoreHandle_t xMutexPrintf, xMutexIdle, xMutexI2C, xTCPSem;
-QueueHandle_t xAnalogQueue, xVeml7700Queue, xBME680Queue;
+QueueHandle_t xAnalogQueue, xVeml7700Queue, xBME680Queue, xWeatherQueue;
 TimerHandle_t xTimerIdle, xTimerDelay;
 
 extern LPTIM_HandleTypeDef hlptim1;
@@ -220,6 +220,7 @@ void MX_FREERTOS_Init(void) {
 	xAnalogQueue = xQueueCreate(2, sizeof(Analog_t));
 	xVeml7700Queue = xQueueCreate(2, sizeof(Veml7700_t));
 	xBME680Queue = xQueueCreate(2, sizeof(BME680_TypeDef));
+	xWeatherQueue = xQueueCreate(2, sizeof(weather_t));
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -327,6 +328,9 @@ void vHeartBeatTask(void *pvParameters) {
 void vLCDTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
+	uint8_t w_flag = 0;
+	uint8_t *weather_widget = &w_flag;
+
 	BaseType_t xStatus;
 
 	uint8_t percentage = 0;
@@ -336,37 +340,52 @@ void vLCDTask(void *pvParameters) {
 	Veml7700_t veml = {0};
 	BME680_TypeDef Bme680 = {0};
 
+	weather_t *w = NULL;
+
 	ILI9341_Init(&hspi1);
 	EF_SetFont(&timesNewRoman_12ptFontInfo);
 	ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
 
 	for (;;) {
 
-		xStatus = xQueueReceive(xAnalogQueue, &adc, pdMS_TO_TICKS(0));
-		if (xStatus == pdPASS) {
-			if (adc.Resault[0] == 99) {
-				EF_PutString((const uint8_t*) "Not Raining", 167, 65, ILI9341_RED, BG_COLOR, ILI9341_BLACK);
-			} else {
-				EF_PutString((const uint8_t*) "    Raining  ", 167, 65, ILI9341_CYAN, BG_COLOR, ILI9341_BLACK);
+		if (*weather_widget == 0) {
+			xStatus = xQueueReceive(xAnalogQueue, &adc, pdMS_TO_TICKS(0));
+			if (xStatus == pdPASS) {
+				if (adc.Resault[0] == 99) {
+					EF_PutString((const uint8_t*) "Not Raining", 167, 65,
+					ILI9341_RED, BG_COLOR, ILI9341_BLACK);
+				} else {
+					EF_PutString((const uint8_t*) "    Raining  ", 167, 65,
+					ILI9341_CYAN, BG_COLOR, ILI9341_BLACK);
+				}
+				ConvertValuesToTFT(245, 110, "%d", adc.Resault[1]);
 			}
-			ConvertValuesToTFT(245, 110, "%d", adc.Resault[1]);
-		}
 
-		xStatus = xQueueReceive(xVeml7700Queue, &veml, pdMS_TO_TICKS(0));
-		if (xStatus == pdPASS) {
-			if (veml.calc_values[0] < 100) {
-				ConvertValuesToTFT(245, 157, "%d   ", veml.calc_values[0]);
-			} else {
-				ConvertValuesToTFT(245, 157, "%d", veml.calc_values[0]);
+			xStatus = xQueueReceive(xVeml7700Queue, &veml, pdMS_TO_TICKS(0));
+			if (xStatus == pdPASS) {
+				if (veml.calc_values[0] < 100) {
+					ConvertValuesToTFT(245, 157, "%d   ", veml.calc_values[0]);
+				} else {
+					ConvertValuesToTFT(245, 157, "%d", veml.calc_values[0]);
+				}
 			}
-		}
 
-		xStatus = xQueueReceive(xBME680Queue, &Bme680, pdMS_TO_TICKS(0));
-		if (xStatus == pdPASS) {
-			ConvertValuesToTFT(55, 110, "%.2f  ", Bme680.Temperature_Calc);
-			ConvertValuesToTFT(55, 65, "%.2f  ", Bme680.Pressure_Calc);
-			ConvertValuesToTFT(55, 160, "%.2f  ", Bme680.Humidity_Calc);
-			ConvertValuesToTFT(55, 200, "%.2f  ", Bme680.IAQ_Calc);
+			xStatus = xQueueReceive(xBME680Queue, &Bme680, pdMS_TO_TICKS(0));
+			if (xStatus == pdPASS) {
+				ConvertValuesToTFT(60, 110, "%.2f  ", Bme680.Temperature_Calc);
+				ConvertValuesToTFT(60, 67, "%.2f  ", Bme680.Pressure_Calc);
+				ConvertValuesToTFT(60, 160, "%.2f  ", Bme680.Humidity_Calc);
+				ConvertValuesToTFT(60, 200, "%.2f  ", Bme680.IAQ_Calc);
+			}
+		} else if (*weather_widget == 1) {
+			xStatus = xQueueReceive(xWeatherQueue, &w, pdMS_TO_TICKS(0));
+			if (xStatus == pdPASS) {
+				ConvertValuesToTFT(60, 110, "%.2f  ", w->temperature);
+				ConvertValuesToTFT(60, 70, "%u  ", w->pressure);
+				ConvertValuesToTFT(60, 160, "%u  ", w->humidity);
+				ConvertValuesToTFT(205, 67, "%.2f m/s", w->wind_speed);
+				ConvertValuesToTFT(235, 115, "%.2f", w->feels_like);
+			}
 		}
 
 		Battery_Control(&adc, &percentage);
@@ -375,19 +394,21 @@ void vLCDTask(void *pvParameters) {
 
 		switch (flag) {
 		case 0x01:
-			ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
+			ILI9341_DrawImage(0, 0, background2, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
 			EF_PutString((const uint8_t*) "Widget Values", 100, 10, ILI9341_MAGENTA, BG_TRANSPARENT, 0);
+			w_flag = 1;
 			vTaskResume(xTCPHandle);
 			break;
 		case 0x02:
 			ILI9341_DrawImage(0, 0, background, ILI9341_TFTWIDTH, ILI9341_TFTHEIGHT);
+			w_flag = 0;
 			vTaskSuspend(xTCPHandle);
 			break;
 		default:
 			break;
 		}
 
-		if(DelayTick == 1) {
+		if (DelayTick == 1) {
 			ILI9341_ClearDisplay(ILI9341_BLACK, 282 + percentage, 12, 1, 11);
 			DelayTick = 0;
 		}
@@ -480,7 +501,7 @@ void vMQTTTask(void *pvParameters) {
 	MX_LWIP_Init();
 	MX_MBEDTLS_Init();
 	ethernetif_notify_conn_changed(&gnetif);
-	tcpclient_init();
+	openweather_init();
 
 	for (;;) {
 
@@ -519,14 +540,22 @@ void vMQTTTask(void *pvParameters) {
 			mqtt_client_free(&static_client);
 		}
 
-		vTaskDelay(pdMS_TO_TICKS(2000));
+		vTaskDelay(pdMS_TO_TICKS(5000)); // Send weather parameters via MQTT to AWS every 5s
 	}
 }
 
 void vHTTPTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
-	tcpinit();
+	struct netconn *conn = NULL;
+	struct netbuf *buf = NULL;
+
+    weather_t *w = NULL;
+
+	for (;;) {
+		openweather_task(w, conn, buf);
+		vTaskDelay(pdMS_TO_TICKS(60000)); // Get weather from openweathermap every 60s
+	}
 }
 
 void _putchar(char character) {
