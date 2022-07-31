@@ -6,10 +6,9 @@
 #include "printf.h"
 
 static int inpub_id;
+
 static void mqtt_incoming_publish_cb(void *arg, const char *topic, u32_t tot_len)
 {
-//  printf("Incoming publish at topic %s with total length %u\n\r", topic, (unsigned int)tot_len);
-
   /* Decode topic string into a user defined reference */
   if(strcmp(topic, "print_payload") == 0) {
     inpub_id = 0;
@@ -90,11 +89,11 @@ err_t mqtt_user_connect(mqtt_client_t *client)
 
     memset(&ci, 0, sizeof(ci));
 
-    ci.client_id = "lwip_test";
-    ci.client_user = "sammy";
-    ci.client_pass = "Password";
+    ci.client_id = "lwip_test"; // Topic name
+    ci.client_user = "sammy"; // User
+    ci.client_pass = "Password"; // Password
 
-    ip4_addr_set_u32(&server, ipaddr_addr("192.168.1.13"));
+    ip4_addr_set_u32(&server, ipaddr_addr("192.168.1.13")); // IP address of MQTT Broker
 
     err = mqtt_client_connect(client, &server, MQTT_TLS_PORT, mqtt_connection_cb, 0, &ci);
 

@@ -33,7 +33,6 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "XPT2046.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -107,7 +106,7 @@ int main(void)
   MX_I2C1_Init();
   MX_USB_OTG_FS_PCD_Init();
   MX_RNG_Init();
-  MX_MBEDTLS_Init();
+  MX_MBEDTLS_Init(); // For further development
 
   /* Initialize interrupts */
   MX_NVIC_Init();

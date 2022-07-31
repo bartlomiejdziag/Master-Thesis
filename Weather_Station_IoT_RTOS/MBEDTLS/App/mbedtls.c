@@ -30,8 +30,8 @@
 #include "mbedtls.h"
 
 /* USER CODE BEGIN 0 */
-//#define SERVER_NAME  "a3fkdk3h9bh19m-ats.iot.eu-west-1.amazonaws.com"
-#define SERVER_NAME  "3.248.137.106"
+#define SERVER_NAME  "a3fkdk3h9bh19m-ats.iot.eu-west-1.amazonaws.com"
+//#define SERVER_NAME  "3.248.137.106"
 
 //Amazon ECC 256 certificate
 const char mbedtls_aws_root_certificate [ ]  =

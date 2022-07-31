@@ -19,17 +19,6 @@ void HAL_ADC_LevelOutOfWindowCallback(ADC_HandleTypeDef *hadc) {
 	}
 }
 
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
-	if (hadc->Instance == ADC1) {
-
-	}
-}
-
-void vTimerIdleCallback(TimerHandle_t xTimer) {
-	configASSERT(xTimer);
-
-}
-
 void vTimerDelayCallback(TimerHandle_t xTimer) {
 	configASSERT(xTimer);
 	DelayTick = 1;

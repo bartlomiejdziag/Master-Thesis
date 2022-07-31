@@ -39,7 +39,7 @@
 #include "i2c.h"
 #include "spi.h"
 #include "adc.h"
-
+#include "helper_functions.h"
 #include "Veml7700.h"
 #include "Bme680.h"
 
@@ -50,7 +50,6 @@
 #include "background.h"
 #include "XPT2046.h"
 
-#include "mbedtls.h"
 #include "http_client.h"
 
 
@@ -93,17 +92,6 @@ extern LPTIM_HandleTypeDef hlptim1;
 
 volatile uint32_t DelayTick;
 
-typedef struct {
-	uint16_t AdcRawValue[3];
-	uint16_t Resault[3];
-} Analog_t;
-
-typedef struct {
-	uint16_t als;
-	uint16_t white;
-	uint16_t calc_values[2];
-} Veml7700_t;
-
 /* USER CODE END Variables */
 /* Definitions for DefaultTask */
 osThreadId_t DefaultTaskHandle;
@@ -123,47 +111,7 @@ void vLCDTouchTask(void *pvParameters);
 void vVeml7700Task(void *pvParameters);
 void vMQTTTask(void *pvParameters);
 void vHTTPTask(void *pvParameters);
-void vHeartBeatTask(void *pvParameters);
-void vTimerIdleCallback(TimerHandle_t xTimer);
 void vTimerDelayCallback(TimerHandle_t xTimer);
-
-static inline uint16_t* xCalcAdc(uint16_t *adc, uint16_t *resault) {
-	for (uint8_t i = 0; i < ADC_SAMPLES; i++) {
-		if (i != 2) {
-			resault[i] = ((adc[i] * 100U) / 1024U);
-		} else {
-			resault[i] = (uint16_t)((adc[i]) / 2.45);
-		}
-	}
-	return resault;
-}
-
-static void ConvertValuesToTFT(uint16_t PosX, uint16_t PosY, char const *format, ...)
-{
-	va_list args;
-	char buf[512];
-
-	va_start(args, format);
-	vsnprintf(buf, sizeof(buf), format, args);
-	va_end(args);
-	EF_PutString((const uint8_t*)buf, PosX, PosY, ILI9341_WHITE, BG_COLOR, ILI9341_BLACK);
-}
-
-static void Battery_Control(Analog_t *adc, uint8_t *percentage) {
-	if (adc->Resault[2] >= 100) {
-		*percentage = 25;
-	} else {
-		*percentage = ((adc->Resault[2] % 25U));
-	}
-
-	GFX_DrawFillRectangle(282, 12, *percentage, 11, ILI9341_GREEN);
-
-	if (adc->Resault[2] > 82) {
-		HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
-	} else {
-		HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-	}
-}
 
 /* USER CODE END FunctionPrototypes */
 
@@ -211,7 +159,6 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_TIMERS */
 	/* start timers, add new ones, ... */
-	xTimerIdle = xTimerCreate("TimerIdle", pdMS_TO_TICKS(1000), pdTRUE, (void*) 0, vTimerIdleCallback);
 	xTimerDelay = xTimerCreate("TimerDelay", pdMS_TO_TICKS(1000), pdTRUE, (void*) 0, vTimerDelayCallback);
   /* USER CODE END RTOS_TIMERS */
 
@@ -230,12 +177,11 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
 	xTaskCreate(vAnalogTask, "AnalogTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vHeartBeatTask, "HeartBeatTask", 256, (void*) 1, LOW_PRIORITY, NULL);
 	xTaskCreate(vBme680Task, "Bme680Task", 512, (void*) 1, NORMAL_PRIORITY, NULL);
 	xTaskCreate(vLCDTask, "LCDTask", 512, (void*) 1, HIGH_PRIORITY, &xLCDHandle);
 	xTaskCreate(vLCDTouchTask, "LCDTouchTask", 256, (void*) 1, NORMAL_PRIORITY, NULL);
 	xTaskCreate(vVeml7700Task, "Veml7700Task", 256, (void*) 1, NORMAL_PRIORITY, NULL);
-	xTaskCreate(vMQTTTask, "vMQTTTask", 2048, (void*) 1, HIGH_PRIORITY, NULL);
+	xTaskCreate(vMQTTTask, "vMQTTTask", 1024, (void*) 1, HIGH_PRIORITY, NULL);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -254,10 +200,6 @@ void MX_FREERTOS_Init(void) {
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN StartDefaultTask */
-	if ( xTimerStart( xTimerIdle, 0 ) != pdPASS) {
-		printf("Timer not created\n\r");
-	}
-
 	if( xTimerStart(xTimerDelay, 0) != pdPASS) {
 		printf("Timer not created\n\r");
 	}
@@ -314,33 +256,24 @@ void vBme680Task(void *pvParameters) {
 	}
 }
 
-/* HeartBeat Task */
-void vHeartBeatTask(void *pvParameters) {
-	configASSERT(((uint32_t ) pvParameters) == 1);
-
-	for (;;) {
-		HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
-		vTaskDelay(pdMS_TO_TICKS(2000));
-	}
-}
-
 /* LCD TFT 2,8" */
 void vLCDTask(void *pvParameters) {
 	configASSERT(((uint32_t ) pvParameters) == 1);
 
-	uint8_t w_flag = 0;
-	uint8_t *weather_widget = &w_flag;
+	uint32_t w_flag = 0;
+	uint32_t *weather_widget = &w_flag;
 
 	BaseType_t xStatus;
 
-	uint8_t percentage = 0;
+	uint32_t percentage = 0;
 	uint32_t flag;
 
 	Analog_t adc = {0};
 	Veml7700_t veml = {0};
 	BME680_TypeDef Bme680 = {0};
 
-	weather_t *w = NULL;
+	weather_t w = {0};
+	weather_t *weather = &w;
 
 	ILI9341_Init(&hspi1);
 	EF_SetFont(&timesNewRoman_12ptFontInfo);
@@ -378,14 +311,12 @@ void vLCDTask(void *pvParameters) {
 				ConvertValuesToTFT(60, 200, "%.2f  ", Bme680.IAQ_Calc);
 			}
 		} else if (*weather_widget == 1) {
-			xStatus = xQueueReceive(xWeatherQueue, &w, pdMS_TO_TICKS(0));
-			if (xStatus == pdPASS) {
-				ConvertValuesToTFT(60, 110, "%.2f  ", w->temperature);
-				ConvertValuesToTFT(60, 70, "%u  ", w->pressure);
-				ConvertValuesToTFT(60, 160, "%u  ", w->humidity);
-				ConvertValuesToTFT(205, 67, "%.2f m/s", w->wind_speed);
-				ConvertValuesToTFT(235, 115, "%.2f", w->feels_like);
-			}
+			xQueueReceive(xWeatherQueue, &weather, pdMS_TO_TICKS(0));
+			ConvertValuesToTFT(60, 110, "%.2f     ", weather->temperature);
+			ConvertValuesToTFT(60, 70, "%u     ", weather->pressure);
+			ConvertValuesToTFT(60, 160, "%u     ", weather->humidity);
+			ConvertValuesToTFT(205, 67, "%.2f m/s", weather->wind_speed);
+			ConvertValuesToTFT(235, 115, "%.2f", weather->feels_like);
 		}
 
 		Battery_Control(&adc, &percentage);
@@ -499,7 +430,6 @@ void vMQTTTask(void *pvParameters) {
 	BME680_TypeDef Bme680 = {0};
 
 	MX_LWIP_Init();
-	MX_MBEDTLS_Init();
 	ethernetif_notify_conn_changed(&gnetif);
 	openweather_init();
 
@@ -507,9 +437,6 @@ void vMQTTTask(void *pvParameters) {
 
 		if (err != ERR_OK) {
 			err = mqtt_user_connect(&static_client);
-//			net_clear();
-//			MX_MBEDTLS_Init();
-//			net_connect();
 		} else {
 			xStatus = xQueueReceive(xAnalogQueue, &adc, pdMS_TO_TICKS(0));
 			if (xStatus == pdPASS) {
@@ -550,14 +477,17 @@ void vHTTPTask(void *pvParameters) {
 	struct netconn *conn = NULL;
 	struct netbuf *buf = NULL;
 
-    weather_t *w = NULL;
+	weather_t w = {0};
+	weather_t *weather = &w;
 
 	for (;;) {
-		openweather_task(w, conn, buf);
-		vTaskDelay(pdMS_TO_TICKS(60000)); // Get weather from openweathermap every 60s
+		openweather_task(weather, conn, buf);
+		vTaskDelay(pdMS_TO_TICKS(30000)); // Get weather from openweathermap every 30s
 	}
 }
 
+
+/*-----------------------UART---------------------------------*/
 void _putchar(char character) {
 // send char to console etc.
 	xSemaphoreTake(xMutexPrintf, portMAX_DELAY);

@@ -65,14 +65,14 @@ static int parse_OWM_data(char *data, weather_t *w) {
     w->visibility = (uint32_t) visibility / 1000.0;
     w->wind_speed = wind_speed;
 
-    printf("temp: %0.2f feels: %0.2f pressure: %u humidity: %u wind_speed: %0.2f\r\n", w->temperature, w->feels_like, w->pressure, w->humidity, w->wind_speed);
+//    printf("temp: %0.2f feels: %0.2f pressure: %u humidity: %u wind_speed: %0.2f\r\n", w->temperature, w->feels_like, w->pressure, w->humidity, w->wind_speed);
     return 0;
 }
 
 void openweather_init(void)
 {
 	xTCPSem = xSemaphoreCreateMutex();  // the semaphore would prevent simultaneous access to tcpsend
-	xTaskCreate(vHTTPTask, "HTTPTask", 1024, (void*) 1, MAX_PRIORITY, &xTCPHandle);
+	xTaskCreate(vHTTPTask, "HTTPTask", 1024, (void*) 1, 3, &xTCPHandle);
 	vTaskSuspend(xTCPHandle);
 }
 
